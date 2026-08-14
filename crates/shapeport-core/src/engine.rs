@@ -620,7 +620,11 @@ mod tests {
         plan.execution.error_policy = ErrorPolicy::Collect;
 
         let outcome = execute_detailed(&plan, vec![bad, good]).expect("exec");
-        assert_eq!(outcome.records.len(), 1, "only the good record passes through");
+        assert_eq!(
+            outcome.records.len(),
+            1,
+            "only the good record passes through"
+        );
         assert_eq!(outcome.rejects.len(), 1, "bad record must be collected");
         assert_eq!(outcome.rejects[0].index, 0);
         assert!(
