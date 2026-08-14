@@ -178,7 +178,12 @@ fn is_grouped(select: &Select) -> bool {
 }
 
 fn is_agg_item(item: &SelectItem) -> bool {
-    matches!(item, SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } if is_agg_expr(expr))
+    match item {
+        SelectItem::UnnamedExpr(expr)
+        | SelectItem::ExprWithAlias { expr, .. }
+        | SelectItem::ExprWithAliases { expr, .. } => is_agg_expr(expr),
+        SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => false,
+    }
 }
 
 fn is_agg_expr(expr: &SqlExpr) -> bool {
@@ -239,7 +244,7 @@ fn project_row(select: &Select, row: &Value) -> Result<Value> {
                     }
                 }
             }
-            SelectItem::QualifiedWildcard(_, _) => {
+            SelectItem::QualifiedWildcard(_, _) | SelectItem::ExprWithAliases { .. } => {
                 return Err(Error::usage("sql_select", "unsupported select item"));
             }
         }
@@ -257,7 +262,9 @@ fn project_group(select: &Select, first: &Value, members: &[Value]) -> Result<Va
             SelectItem::ExprWithAlias { expr, alias } => {
                 map.insert(alias.value.clone(), eval_group_expr(expr, first, members)?);
             }
-            SelectItem::QualifiedWildcard(_, _) | SelectItem::Wildcard(_) => {
+            SelectItem::QualifiedWildcard(_, _)
+            | SelectItem::Wildcard(_)
+            | SelectItem::ExprWithAliases { .. } => {
                 return Err(Error::usage(
                     "sql_select",
                     "unsupported grouped select item",
@@ -562,5 +569,19 @@ mod tests {
         )
         .expect("sql");
         assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn multi_alias_projection_is_unsupported() {
+        let rows = vec![Value::object([("col".into(), Value::Int(1))])];
+        let mut tables = HashMap::new();
+        tables.insert("input".into(), rows);
+        let err = execute_sql("SELECT col AS (a, b) FROM input", &tables)
+            .expect_err("multi-alias projection");
+        let message = err.to_string();
+        assert!(
+            message.contains("unsupported select item"),
+            "unexpected error: {message}"
+        );
     }
 }

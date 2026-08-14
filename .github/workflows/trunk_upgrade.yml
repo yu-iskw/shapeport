@@ -17,10 +17,10 @@ jobs:
       pull-requests: write # For trunk to create PRs
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       # >>> Install your own deps here (npm install, etc) <<<
       # SEE https://github.com/trunk-io/trunk-action
       - name: Trunk Upgrade
-        uses: trunk-io/trunk-action/upgrade@v1
+        uses: trunk-io/trunk-action/upgrade@04ba50e7658c81db7356da96657e6e77f220bfa3 # v1.3.1
         with:
           signoff: true
