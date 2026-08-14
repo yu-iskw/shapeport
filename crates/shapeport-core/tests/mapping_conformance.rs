@@ -223,9 +223,10 @@ fn assert_case(case: &Case, observed: &Observed) {
         }
     }
 
-    let unsafe_mapping = observed.mappings.iter().any(|(target, source)| {
-        case.expect.mappings.get(target) != Some(source)
-    });
+    let unsafe_mapping = observed
+        .mappings
+        .iter()
+        .any(|(target, source)| case.expect.mappings.get(target) != Some(source));
     assert_eq!(
         unsafe_mapping, case.expect.unsafe_auto_mapping,
         "{}: unsafe auto-mapping expectation mismatch",
