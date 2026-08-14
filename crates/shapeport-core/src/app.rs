@@ -179,12 +179,7 @@ pub fn transform_data(
         }
     }
     let encoded = encode_records(&outcome.records, request.output_format)?;
-    if encoded.len() as u64 > config.limits.max_output_bytes {
-        return Err(Error::limit(
-            "max_output_bytes",
-            "encoded output exceeds maxOutputBytes",
-        ));
-    }
+    check_output_bytes(&encoded, config)?;
     let diagnostics: Vec<Diagnostic> = outcome
         .rejects
         .iter()
@@ -311,7 +306,9 @@ pub fn query_sources(request: &QueryRequest, config: &RuntimeConfig) -> Result<T
         tables.insert("input".into(), rows.clone());
     }
     let records = execute_sql(&request.sql, &tables)?;
+    check_row_limit(records.len(), config)?;
     let bytes = encode_records(&records, request.output_format)?;
+    check_output_bytes(&bytes, config)?;
     Ok(TransformResult {
         records,
         bytes,
@@ -425,6 +422,16 @@ fn check_row_limit(rows: usize, config: &RuntimeConfig) -> Result<()> {
     Ok(())
 }
 
+fn check_output_bytes(encoded: &[u8], config: &RuntimeConfig) -> Result<()> {
+    if encoded.len() as u64 > config.limits.max_output_bytes {
+        return Err(Error::limit(
+            "max_output_bytes",
+            "encoded output exceeds maxOutputBytes",
+        ));
+    }
+    Ok(())
+}
+
 /// Check that no record exceeds the configured nesting depth.
 fn check_nesting_depth(records: &[Value], config: &RuntimeConfig) -> Result<()> {
     let max = config.limits.max_nesting_depth;
@@ -457,12 +464,16 @@ pub(crate) fn value_depth(value: &Value) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{InspectRequest, SourceSpec, inspect_source, value_depth};
+    use super::{
+        InspectRequest, QueryRequest, SourceSpec, inspect_source, query_sources, value_depth,
+    };
     use crate::config::{InferMode, RuntimeConfig};
     use crate::engine::{ExecuteOutcome, RejectedRecord};
+    use crate::error::ErrorKind;
     use crate::formats::FormatId;
     use crate::security::write_artifact;
     use crate::value::Value;
+    use std::collections::HashMap;
 
     #[test]
     fn inspects_inline_json() {
@@ -554,5 +565,68 @@ mod tests {
 
         config.limits.max_nesting_depth = 5;
         assert!(check_nesting_depth(&records, &config).is_ok());
+    }
+
+    fn json_rows(rows: Vec<Value>) -> SourceSpec {
+        SourceSpec {
+            uri: None,
+            inline: Some(Value::Array(rows)),
+            format: Some(FormatId::Json),
+            bytes: None,
+        }
+    }
+
+    fn pair_row(key: i64, tag: &str) -> Value {
+        Value::object([
+            ("k".into(), Value::Int(key)),
+            ("tag".into(), Value::String(tag.into())),
+        ])
+    }
+
+    #[test]
+    fn query_join_result_enforces_max_rows() {
+        let mut config = RuntimeConfig::default();
+        config.limits.max_rows = 3;
+        let mut sources = HashMap::new();
+        sources.insert(
+            "a".into(),
+            json_rows(vec![pair_row(1, "a1"), pair_row(1, "a2")]),
+        );
+        sources.insert(
+            "b".into(),
+            json_rows(vec![pair_row(1, "b1"), pair_row(1, "b2")]),
+        );
+        let err = query_sources(
+            &QueryRequest {
+                sql: "SELECT * FROM a INNER JOIN b ON a.k = b.k".into(),
+                sources,
+                output_format: FormatId::Json,
+                infer: InferMode::Conservative,
+            },
+            &config,
+        )
+        .expect_err("join result exceeds max_rows");
+        assert_eq!(err.kind, ErrorKind::ResourceLimit);
+        assert_eq!(err.code, "max_rows");
+    }
+
+    #[test]
+    fn query_result_enforces_max_output_bytes() {
+        let mut config = RuntimeConfig::default();
+        config.limits.max_output_bytes = 1;
+        let mut sources = HashMap::new();
+        sources.insert("input".into(), json_rows(vec![pair_row(1, "a1")]));
+        let err = query_sources(
+            &QueryRequest {
+                sql: "SELECT * FROM input".into(),
+                sources,
+                output_format: FormatId::Json,
+                infer: InferMode::Conservative,
+            },
+            &config,
+        )
+        .expect_err("encoded query exceeds max_output_bytes");
+        assert_eq!(err.kind, ErrorKind::ResourceLimit);
+        assert_eq!(err.code, "max_output_bytes");
     }
 }

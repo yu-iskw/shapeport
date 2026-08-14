@@ -503,24 +503,42 @@ pub fn infer_schema(records: &[Value], infer: InferMode) -> Result<Schema> {
     Ok(Schema::record(fields))
 }
 
-fn unify_fields(fields: &mut [Field], records: &[Value], infer: InferMode) -> Result<()> {
+fn unify_fields(fields: &mut Vec<Field>, records: &[Value], infer: InferMode) -> Result<()> {
     for record in records.iter().skip(1) {
         let Some(object) = record.as_object() else {
             continue;
         };
-        for field in fields.iter_mut() {
-            if let Some(value) = object.get(&field.name) {
-                let next = type_of(value);
-                field.ty = unify_types(&field.ty, &next, infer)?;
-                if value.is_null() {
-                    field.nullable = true;
-                }
-            } else {
+        update_existing_fields(fields, object, infer)?;
+        append_new_fields(fields, object);
+    }
+    Ok(())
+}
+
+fn update_existing_fields(
+    fields: &mut [Field],
+    object: &IndexMap<String, Value>,
+    infer: InferMode,
+) -> Result<()> {
+    for field in fields.iter_mut() {
+        if let Some(value) = object.get(&field.name) {
+            field.ty = unify_types(&field.ty, &type_of(value), infer)?;
+            if value.is_null() {
                 field.nullable = true;
             }
+        } else {
+            field.nullable = true;
         }
     }
     Ok(())
+}
+
+fn append_new_fields(fields: &mut Vec<Field>, object: &IndexMap<String, Value>) {
+    for (name, value) in object {
+        if fields.iter().any(|field| field.name == *name) {
+            continue;
+        }
+        fields.push(Field::new(name, type_of(value), true));
+    }
 }
 
 fn type_of(value: &Value) -> Type {
@@ -623,6 +641,20 @@ mod tests {
         ];
         let err = infer_schema(&records, InferMode::Conservative).unwrap_err();
         assert_eq!(err.code, "type_conflict");
+    }
+
+    #[test]
+    fn infer_schema_includes_fields_first_seen_later() {
+        let records = vec![
+            Value::object([("a".into(), Value::Int(1))]),
+            Value::object([("b".into(), Value::Int(2))]),
+        ];
+        let schema = infer_schema(&records, InferMode::Conservative).expect("schema");
+        let fields = schema.fields().expect("record");
+        let a = fields.iter().find(|f| f.name == "a").expect("a");
+        let b = fields.iter().find(|f| f.name == "b").expect("b");
+        assert!(a.nullable, "a missing on later row");
+        assert!(b.nullable, "b missing on first row");
     }
 
     #[test]

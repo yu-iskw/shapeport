@@ -545,6 +545,10 @@ fn make_receipt(rows: u64, bytes: u64, format: FormatId) -> JsonValue {
     })
 }
 
+const fn is_binary_format(format: FormatId) -> bool {
+    matches!(format, FormatId::Parquet | FormatId::ArrowIpc)
+}
+
 fn pack_data(
     result: &shapeport_core::TransformResult,
     format: FormatId,
@@ -553,7 +557,10 @@ fn pack_data(
     let rows = result.records.len() as u64;
     let bytes = result.bytes.len() as u64;
     let diagnostics = collect_diagnostics(&result.diagnostics);
-    if bytes > config.mcp.inline_max_bytes || rows > config.mcp.inline_max_rows {
+    if is_binary_format(format)
+        || bytes > config.mcp.inline_max_bytes
+        || rows > config.mcp.inline_max_rows
+    {
         return pack_artifact(result, format, config, rows, bytes, diagnostics);
     }
     let payload = if format == FormatId::Json || format == FormatId::Jsonl {
@@ -773,7 +780,11 @@ fn check_bearer(headers: &HeaderMap, expected: &str) -> Result<(), StatusCode> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeConfig, SocketAddr, serve_http};
+    use super::{
+        ConvertRequest, FormatId, InferMode, JsonValue, RuntimeConfig, SocketAddr, SourceSpec,
+        Value, convert_data, pack_data, serve_http,
+    };
+    use shapeport_core::read_artifact;
 
     /// `serve_http` must return an error before binding when the address is
     /// non-loopback and no bearer token is configured.
@@ -787,5 +798,111 @@ mod tests {
             msg.contains("SHAPEPORT_MCP_TOKEN"),
             "expected token hint in message, got: {msg}"
         );
+    }
+
+    fn artifact_config() -> RuntimeConfig {
+        let root = {
+            let mut path = std::env::temp_dir();
+            path.push(format!(
+                "shapeport_mcp_pack_{}_{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("time")
+                    .as_nanos()
+            ));
+            path
+        };
+        let mut config = RuntimeConfig::default();
+        config.filesystem.write_roots = vec![root.clone()];
+        config.filesystem.read_roots = vec![root];
+        config
+    }
+
+    fn tiny_json_source() -> SourceSpec {
+        SourceSpec {
+            uri: None,
+            inline: Some(Value::Array(vec![Value::object([(
+                "n".into(),
+                Value::Int(1),
+            )])])),
+            format: Some(FormatId::Json),
+            bytes: None,
+        }
+    }
+
+    fn packed_ok(
+        result: Result<super::Json<super::DataOut>, super::Json<super::ToolErrorOut>>,
+        what: &str,
+    ) -> super::Json<super::DataOut> {
+        result.unwrap_or_else(|_| panic!("{what}"))
+    }
+
+    #[test]
+    fn pack_data_artifacts_small_parquet() {
+        let config = artifact_config();
+        let converted = convert_data(
+            &ConvertRequest {
+                source: tiny_json_source(),
+                to: FormatId::Parquet,
+                infer: InferMode::Conservative,
+            },
+            &config,
+        )
+        .expect("convert");
+        assert!(
+            (converted.bytes.len() as u64) < config.mcp.inline_max_bytes,
+            "fixture must stay under inline byte threshold"
+        );
+        let packed = packed_ok(
+            pack_data(&converted, FormatId::Parquet, &config),
+            "pack parquet",
+        );
+        assert!(packed.0.result.is_none(), "binary must not inline");
+        let artifact = packed.0.artifact.expect("artifact");
+        let stored = read_artifact(&artifact.uri, &config).expect("read");
+        assert_eq!(stored, converted.bytes);
+    }
+
+    #[test]
+    fn pack_data_artifacts_small_arrow_ipc() {
+        let config = artifact_config();
+        let converted = convert_data(
+            &ConvertRequest {
+                source: tiny_json_source(),
+                to: FormatId::ArrowIpc,
+                infer: InferMode::Conservative,
+            },
+            &config,
+        )
+        .expect("convert");
+        let packed = packed_ok(
+            pack_data(&converted, FormatId::ArrowIpc, &config),
+            "pack arrow-ipc",
+        );
+        assert!(packed.0.result.is_none());
+        let artifact = packed.0.artifact.expect("artifact");
+        let stored = read_artifact(&artifact.uri, &config).expect("read");
+        assert_eq!(stored, converted.bytes);
+    }
+
+    #[test]
+    fn pack_data_keeps_small_csv_inline() {
+        let config = artifact_config();
+        let converted = convert_data(
+            &ConvertRequest {
+                source: tiny_json_source(),
+                to: FormatId::Csv,
+                infer: InferMode::Conservative,
+            },
+            &config,
+        )
+        .expect("convert");
+        let packed = packed_ok(pack_data(&converted, FormatId::Csv, &config), "pack csv");
+        assert!(packed.0.artifact.is_none());
+        let Some(JsonValue::String(text)) = packed.0.result else {
+            panic!("expected inline CSV string");
+        };
+        assert!(text.contains('n'), "csv header: {text}");
     }
 }

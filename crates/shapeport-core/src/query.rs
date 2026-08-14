@@ -115,30 +115,54 @@ fn apply_join(
     tables: &HashMap<String, Vec<Value>>,
 ) -> Result<Vec<Value>> {
     let right = named_table_rows(&join.relation, tables)?;
-    let (is_left, constraint) = match &join.join_operator {
-        JoinOperator::Inner(constraint) => (false, constraint),
-        JoinOperator::LeftOuter(constraint) => (true, constraint),
-        _ => {
-            return Err(Error::usage(
-                "sql_join",
-                "only INNER JOIN and LEFT JOIN are supported",
-            ));
-        }
-    };
+    let (is_left, constraint) = join_sides(&join.join_operator)?;
     let JoinConstraint::On(expr) = constraint else {
         return Err(Error::usage("sql_join", "JOIN must use ON equality"));
     };
-    Ok(equi_join(left_rows, &right, expr, is_left))
+    Ok(equi_join(
+        left_rows,
+        &right,
+        expr,
+        is_left,
+        &table_factor_name(&join.relation),
+    ))
 }
 
-fn equi_join(left_rows: &[Value], right_rows: &[Value], on: &SqlExpr, is_left: bool) -> Vec<Value> {
+fn join_sides(operator: &JoinOperator) -> Result<(bool, &JoinConstraint)> {
+    match operator {
+        JoinOperator::Inner(constraint) | JoinOperator::Join(constraint) => Ok((false, constraint)),
+        JoinOperator::LeftOuter(constraint) | JoinOperator::Left(constraint) => {
+            Ok((true, constraint))
+        }
+        _ => Err(Error::usage(
+            "sql_join",
+            "only INNER JOIN and LEFT JOIN are supported",
+        )),
+    }
+}
+
+fn table_factor_name(factor: &TableFactor) -> String {
+    match factor {
+        TableFactor::Table { name, alias, .. } => alias
+            .as_ref()
+            .map_or_else(|| object_name(name), |alias| alias.name.value.clone()),
+        _ => String::new(),
+    }
+}
+
+fn equi_join(
+    left_rows: &[Value],
+    right_rows: &[Value],
+    on: &SqlExpr,
+    is_left: bool,
+    right_name: &str,
+) -> Vec<Value> {
     let mut out = Vec::new();
     for left in left_rows {
         let mut matched = false;
         for right in right_rows {
-            let merged = merge_objects(left, right);
-            if eval_bool(on, &merged).unwrap_or(false) {
-                out.push(merged);
+            if eval_join_bool(on, left, right, right_name).unwrap_or(false) {
+                out.push(merge_objects(left, right));
                 matched = true;
             }
         }
@@ -147,6 +171,59 @@ fn equi_join(left_rows: &[Value], right_rows: &[Value], on: &SqlExpr, is_left: b
         }
     }
     out
+}
+
+fn eval_join_bool(expr: &SqlExpr, left: &Value, right: &Value, right_name: &str) -> Result<bool> {
+    match eval_join_expr(expr, left, right, right_name)? {
+        Value::Bool(flag) => Ok(flag),
+        Value::Null => Ok(false),
+        other => Ok(other.is_truthy()),
+    }
+}
+
+fn eval_join_expr(expr: &SqlExpr, left: &Value, right: &Value, right_name: &str) -> Result<Value> {
+    match expr {
+        SqlExpr::Identifier(ident) => Ok(lookup_unqualified(&ident.value, left, right)),
+        SqlExpr::CompoundIdentifier(parts) => Ok(lookup_qualified(parts, left, right, right_name)),
+        SqlExpr::Value(value) => literal(&value.value),
+        SqlExpr::BinaryOp {
+            left: lhs,
+            op,
+            right: rhs,
+        } => {
+            let lv = eval_join_expr(lhs, left, right, right_name)?;
+            let rv = eval_join_expr(rhs, left, right, right_name)?;
+            eval_binary_values(op, &lv, &rv)
+        }
+        _ => Err(Error::usage(
+            "sql_expr",
+            format!("unsupported SQL expression {expr}"),
+        )),
+    }
+}
+
+fn lookup_qualified(
+    parts: &[sqlparser::ast::Ident],
+    left: &Value,
+    right: &Value,
+    right_name: &str,
+) -> Value {
+    let Some(col) = parts.last() else {
+        return Value::Null;
+    };
+    if parts.len() >= 2 && parts[parts.len() - 2].value == right_name {
+        lookup(right, &col.value)
+    } else {
+        lookup(left, &col.value)
+    }
+}
+
+fn lookup_unqualified(name: &str, left: &Value, right: &Value) -> Value {
+    if left.as_object().is_some_and(|map| map.contains_key(name)) {
+        lookup(left, name)
+    } else {
+        lookup(right, name)
+    }
 }
 
 fn merge_objects(left: &Value, right: &Value) -> Value {
@@ -562,5 +639,94 @@ mod tests {
         )
         .expect("sql");
         assert_eq!(out.len(), 1);
+    }
+
+    fn tables_ab() -> HashMap<String, Vec<Value>> {
+        let mut tables = HashMap::new();
+        tables.insert(
+            "a".into(),
+            vec![
+                Value::object([
+                    ("id".into(), Value::Int(1)),
+                    ("name".into(), Value::String("a1".into())),
+                ]),
+                Value::object([
+                    ("id".into(), Value::Int(2)),
+                    ("name".into(), Value::String("a2".into())),
+                ]),
+            ],
+        );
+        tables.insert(
+            "b".into(),
+            vec![
+                Value::object([
+                    ("id".into(), Value::Int(1)),
+                    ("x".into(), Value::String("b1".into())),
+                ]),
+                Value::object([
+                    ("id".into(), Value::Int(99)),
+                    ("x".into(), Value::String("b99".into())),
+                ]),
+            ],
+        );
+        tables
+    }
+
+    #[test]
+    fn inner_join_on_shared_id_is_equi_not_cartesian() {
+        let out = execute_sql(
+            "SELECT name, x FROM a INNER JOIN b ON a.id = b.id",
+            &tables_ab(),
+        )
+        .expect("sql");
+        assert_eq!(out.len(), 1);
+        let row = out[0].as_object().expect("object");
+        assert_eq!(row.get("name"), Some(&Value::String("a1".into())));
+        assert_eq!(row.get("x"), Some(&Value::String("b1".into())));
+    }
+
+    #[test]
+    fn left_join_keeps_unmatched_left_row() {
+        let out = execute_sql(
+            "SELECT name, x FROM a LEFT JOIN b ON a.id = b.id",
+            &tables_ab(),
+        )
+        .expect("sql");
+        assert_eq!(out.len(), 2);
+        let names: Vec<_> = out
+            .iter()
+            .filter_map(Value::as_object)
+            .filter_map(|row| row.get("name"))
+            .collect();
+        assert!(names.contains(&&Value::String("a1".into())));
+        assert!(names.contains(&&Value::String("a2".into())));
+    }
+
+    #[test]
+    fn inner_join_on_distinct_key_names() {
+        let mut tables = HashMap::new();
+        tables.insert(
+            "a".into(),
+            vec![Value::object([
+                ("id".into(), Value::Int(1)),
+                ("name".into(), Value::String("a1".into())),
+            ])],
+        );
+        tables.insert(
+            "b".into(),
+            vec![Value::object([
+                ("aid".into(), Value::Int(1)),
+                ("x".into(), Value::String("b1".into())),
+            ])],
+        );
+        let out = execute_sql(
+            "SELECT name, x FROM a INNER JOIN b ON a.id = b.aid",
+            &tables,
+        )
+        .expect("sql");
+        assert_eq!(out.len(), 1);
+        let row = out[0].as_object().expect("object");
+        assert_eq!(row.get("name"), Some(&Value::String("a1".into())));
+        assert_eq!(row.get("x"), Some(&Value::String("b1".into())));
     }
 }
