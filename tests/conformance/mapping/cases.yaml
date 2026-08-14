@@ -1,0 +1,392 @@
+version: 1
+cases:
+  - name: exact-name-strict
+    family: exact-name
+    mode: strict
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer_id
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer_id
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        customer_id: customer_id
+      reasonKinds:
+        customer_id: [exact-name match, exact type match]
+
+  - name: normalized-snake-to-camel
+    family: naming-convention
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer_id
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: customerId
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        customerId: customer_id
+      reasonKinds:
+        customerId: [normalized-name match, exact type match]
+
+  - name: explicit-alias-strict
+    family: aliases
+    mode: strict
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: legacy_customer_key
+            type: { kind: string }
+            nullable: false
+            aliases: [customer_id]
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer_id
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        customer_id: legacy_customer_key
+      reasonKinds:
+        customer_id: [alias match, exact type match]
+
+  - name: incompatible-exact-name-is-not-selected
+    family: casts
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: amount
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: amount
+            type: { kind: bool }
+            nullable: false
+    expect:
+      status: ambiguous
+      ambiguousTargets: [amount]
+      unsafeAutoMapping: false
+
+  - name: nullable-unmatched-target-is-omitted
+    family: nullable
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: id
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: id
+            type: { kind: string }
+            nullable: false
+          - name: description
+            type: { kind: string }
+            nullable: true
+    expect:
+      status: ready
+      mappings:
+        id: id
+      omittedTargets: [description]
+
+  - name: missing-required-target
+    family: missing-required
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: id
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: id
+            type: { kind: string }
+            nullable: false
+          - name: required_name
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ambiguous
+      mappings:
+        id: id
+      ambiguousTargets: [required_name]
+      unsafeAutoMapping: false
+
+  - name: gross-vs-net-amount
+    family: ambiguous
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: gross_amount
+            type: { kind: float, bits: 64 }
+            nullable: false
+          - name: net_amount
+            type: { kind: float, bits: 64 }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: amount
+            type: { kind: float, bits: 64 }
+            nullable: false
+    expect:
+      status: ambiguous
+      ambiguousTargets: [amount]
+      acceptableCandidates:
+        amount: [gross_amount, net_amount]
+      unsafeAutoMapping: false
+
+  - name: normalized-name-collision
+    family: adversarial
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer_id
+            type: { kind: string }
+            nullable: false
+          - name: customer-id
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: customerId
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ambiguous
+      ambiguousTargets: [customerId]
+      acceptableCandidates:
+        customerId: [customer_id, customer-id]
+      unsafeAutoMapping: false
+
+  - name: strong-name-incompatible-type
+    family: adversarial
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: enabled
+            type: { kind: string }
+            nullable: false
+          - name: active_flag
+            type: { kind: bool }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: enabled
+            type: { kind: bool }
+            nullable: false
+    expect:
+      status: ambiguous
+      ambiguousTargets: [enabled]
+      unsafeAutoMapping: false
+
+  - name: flint-warehouse-record
+    family: integrations/flint
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: period
+            type: { kind: string }
+            nullable: false
+          - name: product_family
+            type: { kind: string }
+            nullable: false
+          - name: total_sales_usd
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: month
+            type: { kind: string }
+            nullable: false
+          - name: product
+            type: { kind: string }
+            nullable: false
+          - name: revenue
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        month: period
+        product: product_family
+        revenue: total_sales_usd
+
+  - name: mcp-output-to-input-normalized
+    family: integrations/mcp
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: chart_data
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: chartData
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        chartData: chart_data
+
+  - name: warehouse-customer-id-to-id
+    family: integrations/warehouse
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer_id
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: id
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        id: customer_id
+
+  - name: schema-evolution-rename-through-alias
+    family: schema-evolution
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer_key
+            type: { kind: string }
+            nullable: false
+            aliases: [customer_id]
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer_id
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        customer_id: customer_key
+
+  - name: exact-list-preservation
+    family: arrays
+    mode: strict
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: tags
+            type:
+              kind: list
+              element: { kind: string }
+              element_nullable: false
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: tags
+            type:
+              kind: list
+              element: { kind: string }
+              element_nullable: false
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        tags: tags
+
+  - name: flat-to-nested-requires-structural-planning
+    family: object-construction
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: first_name
+            type: { kind: string }
+            nullable: false
+          - name: last_name
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: person
+            type:
+              kind: record
+              fields:
+                - name: firstName
+                  type: { kind: string }
+                  nullable: false
+                - name: lastName
+                  type: { kind: string }
+                  nullable: false
+            nullable: false
+    expect:
+      status: ambiguous
+      ambiguousTargets: [person]
+      unsafeAutoMapping: false
