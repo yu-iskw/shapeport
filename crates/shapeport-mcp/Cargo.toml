@@ -1,0 +1,33 @@
+[package]
+name = "shapeport-mcp"
+version.workspace = true
+description = "ShapePort MCP 2026-07-28 server (stdio and stateless Streamable HTTP) built on rmcp 3.x."
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["mcp", "rmcp", "shapeport"]
+categories = ["network-programming"]
+rust-version.workspace = true
+
+[dependencies]
+axum.workspace = true
+http.workspace = true
+hex.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+shapeport-core = { path = "../shapeport-core" }
+thiserror.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
