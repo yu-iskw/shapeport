@@ -148,9 +148,7 @@ fn explanation_mappings(
         .collect()
 }
 
-fn explanation_omitted(
-    explanation: &[shapeport_core::planner::ExplainEntry],
-) -> BTreeSet<String> {
+fn explanation_omitted(explanation: &[shapeport_core::planner::ExplainEntry]) -> BTreeSet<String> {
     explanation
         .iter()
         .filter(|entry| entry.action == "omit")
@@ -163,7 +161,12 @@ fn explanation_reasons(
 ) -> BTreeMap<String, BTreeSet<String>> {
     explanation
         .iter()
-        .map(|entry| (entry.target.clone(), entry.reasons.iter().cloned().collect()))
+        .map(|entry| {
+            (
+                entry.target.clone(),
+                entry.reasons.iter().cloned().collect(),
+            )
+        })
         .collect()
 }
 
@@ -178,20 +181,17 @@ fn assert_case(case: &Case, observed: &Observed) {
         "{}: selected mappings mismatch",
         case.name
     );
+    assert_ambiguity(case, observed);
+    assert_explanations(case, observed);
+    assert_safety(case, observed);
+}
 
+fn assert_ambiguity(case: &Case, observed: &Observed) {
     let actual_ambiguous: BTreeSet<_> = observed.unresolved.keys().cloned().collect();
-    let expected_ambiguous: BTreeSet<_> =
-        case.expect.ambiguous_targets.iter().cloned().collect();
+    let expected_ambiguous: BTreeSet<_> = case.expect.ambiguous_targets.iter().cloned().collect();
     assert_eq!(
         actual_ambiguous, expected_ambiguous,
         "{}: ambiguous targets mismatch",
-        case.name
-    );
-
-    let expected_omitted: BTreeSet<_> = case.expect.omitted_targets.iter().cloned().collect();
-    assert_eq!(
-        observed.omitted, expected_omitted,
-        "{}: omitted targets mismatch",
         case.name
     );
 
@@ -208,6 +208,15 @@ fn assert_case(case: &Case, observed: &Observed) {
             case.name
         );
     }
+}
+
+fn assert_explanations(case: &Case, observed: &Observed) {
+    let expected_omitted: BTreeSet<_> = case.expect.omitted_targets.iter().cloned().collect();
+    assert_eq!(
+        observed.omitted, expected_omitted,
+        "{}: omitted targets mismatch",
+        case.name
+    );
 
     for (target, expected_reasons) in &case.expect.reason_kinds {
         let actual = observed
@@ -222,7 +231,9 @@ fn assert_case(case: &Case, observed: &Observed) {
             );
         }
     }
+}
 
+fn assert_safety(case: &Case, observed: &Observed) {
     let unsafe_mapping = observed
         .mappings
         .iter()
@@ -249,17 +260,14 @@ fn add_metrics(summary: &mut Summary, case: &Case, observed: &Observed) {
         .filter(|(target, source)| case.expect.mappings.get(*target) != Some(*source))
         .count();
 
-    let expected_ambiguities: BTreeSet<_> =
-        case.expect.ambiguous_targets.iter().cloned().collect();
+    let expected_ambiguities: BTreeSet<_> = case.expect.ambiguous_targets.iter().cloned().collect();
     let actual_ambiguities: BTreeSet<_> = observed.unresolved.keys().cloned().collect();
     summary.expected_ambiguities += expected_ambiguities.len();
     summary.reported_ambiguities += actual_ambiguities.len();
     summary.correct_ambiguities += expected_ambiguities
         .intersection(&actual_ambiguities)
         .count();
-    summary.false_ambiguities += actual_ambiguities
-        .difference(&expected_ambiguities)
-        .count();
+    summary.false_ambiguities += actual_ambiguities.difference(&expected_ambiguities).count();
 
     if observed.status == case.expect.status
         && observed.mappings == case.expect.mappings
