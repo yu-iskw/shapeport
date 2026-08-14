@@ -239,15 +239,21 @@ fn score_pair(source: &Field, target: &Field, mode: PlannerMode) -> Option<Candi
     let mut reasons: Vec<String> = Vec::new();
     let mut score = 0.0;
     if source.name == target.name {
-        score += 0.30;
+        // Exact names are strong structural evidence. With an exact type match this
+        // scores 1.0, clearing the strict auto-accept threshold.
+        score += 0.80;
         reasons.push("exact-name match".into());
     } else if source.aliases.iter().any(|alias| alias == &target.name) {
-        score += 0.30;
+        // Explicit aliases are user/schema-provided evidence and are as strong as
+        // an exact name for deterministic planning.
+        score += 0.80;
         reasons.push("alias match".into());
     }
     let normalized_eq = normalize_name(&source.name) == normalize_name(&target.name);
     if mode == PlannerMode::Smart && normalized_eq && source.name != target.name {
-        score += 0.20;
+        // A normalized name plus an exact type scores 0.95. Keep this below an
+        // exact/alias match so collisions remain detectable as ambiguity.
+        score += 0.75;
         reasons.push("normalized-name match".into());
     }
     if mode == PlannerMode::Smart
@@ -369,5 +375,21 @@ mod tests {
         let target = Schema::record(vec![Field::new("amount", Type::Float { bits: 64 }, false)]);
         let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
         assert!(matches!(outcome, PlanOutcome::Ambiguous { .. }));
+    }
+
+    #[test]
+    fn exact_name_and_type_clear_strict_threshold() {
+        let source = Schema::record(vec![Field::new("customer_id", Type::String, false)]);
+        let target = Schema::record(vec![Field::new("customer_id", Type::String, false)]);
+        let outcome = plan_schemas(
+            &source,
+            &target,
+            &PlannerOptions {
+                mode: PlannerMode::Strict,
+                ..PlannerOptions::default()
+            },
+        )
+        .expect("plan");
+        assert!(matches!(outcome, PlanOutcome::Ready { .. }));
     }
 }

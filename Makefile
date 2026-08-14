@@ -32,6 +32,11 @@ format:
 test:
 	bash ./dev/test.sh
 
+# Run planner schema-mapping conformance tests and print benchmark metrics.
+.PHONY: conformance
+conformance:
+	cargo test -p shapeport-core --test mapping_conformance -- --nocapture
+
 # Run local CodeQL analysis.
 .PHONY: codeql
 codeql:
