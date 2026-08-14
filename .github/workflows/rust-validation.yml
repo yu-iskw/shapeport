@@ -134,13 +134,13 @@ jobs:
 
       - name: Publish planner conformance baseline
         run: |
-          mkdir -p target
-          SHAPEPORT_CONFORMANCE_JSON=target/conformance-summary.json \
+          mkdir -p "$GITHUB_WORKSPACE/target"
+          SHAPEPORT_CONFORMANCE_JSON="$GITHUB_WORKSPACE/target/conformance-summary.json" \
             cargo test -p shapeport-core --test mapping_conformance -- --nocapture
-          cat target/conformance-summary.json
+          cat "$GITHUB_WORKSPACE/target/conformance-summary.json"
           {
             echo '### Planner conformance baseline'
             echo '```json'
-            cat target/conformance-summary.json
+            cat "$GITHUB_WORKSPACE/target/conformance-summary.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
