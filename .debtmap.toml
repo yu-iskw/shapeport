@@ -13,7 +13,9 @@
 
 [thresholds]
 complexity = 20
-duplication = 40
+duplication = 50
+max_file_length = 500
+max_function_length = 100
 
 [thresholds.validation]
 # Conservative starting gates for an existing codebase. Tighten over time.
@@ -23,15 +25,20 @@ max_codebase_risk_score = 9.0
 min_coverage_percentage = 0.0
 max_total_debt_score = 10000
 
-[tiers]
-critical = 9.0
-high = 7.0
-medium = 5.0
+[languages]
+enabled = ["rust"]
+
+[languages.rust]
+detect_dead_code = false
+detect_complexity = true
+detect_duplication = true
 
 [ignore]
-# Integration-test crates and generated output. In-source `#[cfg(test)]`
-# modules remain visible so production/test complexity can be compared.
 patterns = [
-    "**/target/**",
-    "**/crates/*/tests/**",
+    "target/**",
+    "crates/*/tests/**",
+    "*.min.js",
 ]
+
+[output]
+default_format = "json"

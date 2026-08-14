@@ -1,5 +1,6 @@
 //! Bounded SQL over registered in-memory record tables.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
@@ -361,29 +362,62 @@ fn eval_expr(expr: &SqlExpr, row: &Value) -> Result<Value> {
 fn eval_binary(left: &SqlExpr, op: &BinaryOperator, right: &SqlExpr, row: &Value) -> Result<Value> {
     let lv = eval_expr(left, row)?;
     let rv = eval_expr(right, row)?;
+    eval_binary_values(op, &lv, &rv)
+}
+
+fn eval_binary_values(op: &BinaryOperator, left: &Value, right: &Value) -> Result<Value> {
     match op {
-        BinaryOperator::Eq => Ok(Value::Bool(values_equal(&lv, &rv))),
-        BinaryOperator::NotEq => Ok(Value::Bool(!values_equal(&lv, &rv))),
-        BinaryOperator::Gt => Ok(Value::Bool(
-            values_cmp(&lv, &rv) == std::cmp::Ordering::Greater,
-        )),
-        BinaryOperator::Lt => Ok(Value::Bool(
-            values_cmp(&lv, &rv) == std::cmp::Ordering::Less,
-        )),
-        BinaryOperator::GtEq => Ok(Value::Bool(
-            values_cmp(&lv, &rv) != std::cmp::Ordering::Less,
-        )),
-        BinaryOperator::LtEq => Ok(Value::Bool(
-            values_cmp(&lv, &rv) != std::cmp::Ordering::Greater,
-        )),
-        BinaryOperator::And => Ok(Value::Bool(lv.is_truthy() && rv.is_truthy())),
-        BinaryOperator::Or => Ok(Value::Bool(lv.is_truthy() || rv.is_truthy())),
-        BinaryOperator::Plus => Ok(Value::Float(value_f64(&lv)? + value_f64(&rv)?)),
-        BinaryOperator::Minus => Ok(Value::Float(value_f64(&lv)? - value_f64(&rv)?)),
-        BinaryOperator::Multiply => Ok(Value::Float(value_f64(&lv)? * value_f64(&rv)?)),
-        BinaryOperator::Divide => Ok(Value::Float(value_f64(&lv)? / value_f64(&rv)?)),
+        BinaryOperator::Eq
+        | BinaryOperator::NotEq
+        | BinaryOperator::Gt
+        | BinaryOperator::Lt
+        | BinaryOperator::GtEq
+        | BinaryOperator::LtEq => Ok(Value::Bool(eval_compare(op, left, right))),
+        BinaryOperator::And | BinaryOperator::Or => Ok(Value::Bool(eval_logic(op, left, right))),
+        BinaryOperator::Plus
+        | BinaryOperator::Minus
+        | BinaryOperator::Multiply
+        | BinaryOperator::Divide => eval_arith(op, left, right),
         _ => Err(Error::usage("sql_op", format!("unsupported operator {op}"))),
     }
+}
+
+fn eval_compare(op: &BinaryOperator, left: &Value, right: &Value) -> bool {
+    match op {
+        BinaryOperator::Eq => values_equal(left, right),
+        BinaryOperator::NotEq => !values_equal(left, right),
+        BinaryOperator::Gt => values_cmp(left, right) == Ordering::Greater,
+        BinaryOperator::Lt => values_cmp(left, right) == Ordering::Less,
+        BinaryOperator::GtEq => values_cmp(left, right) != Ordering::Less,
+        BinaryOperator::LtEq => values_cmp(left, right) != Ordering::Greater,
+        _ => false,
+    }
+}
+
+fn eval_logic(op: &BinaryOperator, left: &Value, right: &Value) -> bool {
+    match op {
+        BinaryOperator::And => left.is_truthy() && right.is_truthy(),
+        BinaryOperator::Or => left.is_truthy() || right.is_truthy(),
+        _ => false,
+    }
+}
+
+fn eval_arith(op: &BinaryOperator, left: &Value, right: &Value) -> Result<Value> {
+    let left_n = value_f64(left)?;
+    let right_n = value_f64(right)?;
+    let result = match op {
+        BinaryOperator::Plus => left_n + right_n,
+        BinaryOperator::Minus => left_n - right_n,
+        BinaryOperator::Multiply => left_n * right_n,
+        BinaryOperator::Divide => left_n / right_n,
+        _ => {
+            return Err(Error::usage(
+                "sql_op",
+                format!("unsupported arithmetic operator {op}"),
+            ));
+        }
+    };
+    Ok(Value::Float(result))
 }
 
 fn literal(value: &SqlValue) -> Result<Value> {

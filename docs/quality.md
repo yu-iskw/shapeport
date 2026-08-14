@@ -76,7 +76,8 @@ They operate on different file sets and are not duplicates.
 
 The complexity workflow runs on pull requests, but most Debtmap metrics are informational.
 The fast authoritative gate for per-function complexity is Clippy's `cognitive_complexity` lint with threshold 10.
-Debtmap fails CI only for conservative gates: cyclomatic complexity above 20 (unless justified) and the density threshold in `.debtmap.toml`.
+Debtmap fails CI only for conservative gates: **function-level** cyclomatic complexity above 20 (unless justified) and the density threshold in `.debtmap.toml`.
+File-scope GodObject aggregates are reported for maintainability insight and are not the cyclomatic hard gate.
 
 **Entry point:** `make analyze-complexity`
 
@@ -100,6 +101,9 @@ Private repositories require the `CODEQL_ENABLED=true` secret/environment variab
 
 These tools require a nightly Rust toolchain.
 `setup.sh` does **not** silently install nightly; install it explicitly when needed.
+
+Default Miri scope is `cargo +nightly miri test --workspace --lib`.
+Miri only checks executed paths. OS-heavy integration tests (real sockets) are outside the routine gate.
 
 **Entry point:** `make deep-analysis`
 

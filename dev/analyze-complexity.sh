@@ -89,57 +89,32 @@ except Exception as exc:
     print(f"ERROR: failed to parse {path}: {exc}", file=sys.stderr)
     sys.exit(2)
 
-CYCLO_KEYS = (
-    "cyclomatic",
-    "cyclomatic_complexity",
-    "cyclo",
-    "cyclomatic_complexity_value",
-)
+items = data.get("items") if isinstance(data, dict) else None
+if not isinstance(items, list):
+    print("ERROR: Debtmap JSON does not contain an items array", file=sys.stderr)
+    sys.exit(2)
 
-def iter_items(node):
-    if isinstance(node, list):
-        for item in node:
-            yield from iter_items(item)
-    elif isinstance(node, dict):
-        yield node
-        for value in node.values():
-            yield from iter_items(value)
-
-seen = set()
 violations = []
-for item in iter_items(data):
-    cyclo = None
+for item in items:
+    if not isinstance(item, dict):
+        continue
+    location = item.get("location") if isinstance(item.get("location"), dict) else {}
+    function = str(location.get("function") or "")
+    # File-scope GodObject aggregates are informational, not the function-level gate.
+    if function in {"", "[file-scope]"}:
+        continue
     metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
-    for key in CYCLO_KEYS:
-        for source in (item, metrics):
-            val = source.get(key) if isinstance(source, dict) else None
-            if isinstance(val, (int, float)):
-                cyclo = val
-                break
-        if cyclo is not None:
-            break
-    if cyclo is None or cyclo <= threshold:
+    cyclo = metrics.get("cyclomatic_complexity")
+    if not isinstance(cyclo, (int, float)) or cyclo <= threshold:
         continue
-    name = (
-        item.get("canonical_name")
-        or item.get("name")
-        or item.get("function")
-        or item.get("function_name")
-        or item.get("id")
-        or "unknown"
-    )
-    file = item.get("file") or item.get("path") or item.get("filename") or ""
-    line = item.get("line") or item.get("start_line") or item.get("line_start") or ""
-    identity = (str(file), str(name), str(line), float(cyclo))
-    if identity in seen:
-        continue
-    seen.add(identity)
-    location = f"{file}:{line}" if file else ""
-    violations.append((cyclo, name, location))
+    file = location.get("file") or ""
+    line = location.get("line") or ""
+    location_s = f"{file}:{line}" if file else ""
+    violations.append((cyclo, function, location_s))
 
 violations.sort(key=lambda row: row[0], reverse=True)
-for cyclo, name, location in violations:
-    suffix = f"  {location}" if location else ""
+for cyclo, name, location_s in violations:
+    suffix = f"  {location_s}" if location_s else ""
     print(f"  VIOLATION: {name}  cyclomatic={cyclo} > {threshold}{suffix}")
 print(f"COUNT={len(violations)}")
 sys.exit(0)

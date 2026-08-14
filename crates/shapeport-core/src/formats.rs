@@ -238,8 +238,8 @@ fn decode_jsonl(bytes: &[u8]) -> Result<Vec<Value>> {
 }
 
 fn decode_yaml(bytes: &[u8]) -> Result<Vec<Value>> {
-    let json: serde_json::Value =
-        serde_yml::from_slice(bytes).map_err(|err| Error::parse("yaml_error", err.to_string()))?;
+    let json: serde_json::Value = serde_norway::from_slice(bytes)
+        .map_err(|err| Error::parse("yaml_error", err.to_string()))?;
     let value: Value = serde_json::from_value(json)?;
     Ok(records_from_value(value))
 }
@@ -374,7 +374,7 @@ fn encode_jsonl(records: &[Value]) -> Result<Vec<u8>> {
 
 fn encode_yaml(records: &[Value]) -> Result<Vec<u8>> {
     let json = serde_json::to_value(Value::Array(records.to_vec()))?;
-    serde_yml::to_string(&json)
+    serde_norway::to_string(&json)
         .map(String::into_bytes)
         .map_err(|err| Error::transform("yaml_encode", err.to_string()))
 }

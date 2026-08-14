@@ -637,7 +637,8 @@ fn file_source(path: &Path, format: Option<&str>) -> SourceSpec {
 fn load_json_schema(path: &Path) -> shapeport_core::Result<shapeport_core::Schema> {
     let bytes = std::fs::read(path)?;
     let value: serde_json::Value = if is_yaml_ext(path) {
-        serde_yml::from_slice(&bytes).map_err(|err| Error::parse("yaml_schema", err.to_string()))?
+        serde_norway::from_slice(&bytes)
+            .map_err(|err| Error::parse("yaml_schema", err.to_string()))?
     } else {
         serde_json::from_slice(&bytes)?
     };

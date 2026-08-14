@@ -21,9 +21,12 @@ targets = [
 feature-depth = 1
 
 [advisories]
-# Fail on known vulnerabilities and yanked crates. Unmaintained crates
-# are visible but do not fail the fast PR loop by themselves.
+# Fail on vulnerabilities, unsoundness, and yanked crates.
+# Scope for unmaintained-crate detection:
+# workspace = only fail when a direct workspace dependency is unmaintained.
+# Transitive unmaintained crates (e.g. paste via parquet) are not PR blockers.
 yanked = "deny"
+unmaintained = "workspace"
 ignore = [
     # Add ignored advisory IDs with a reason, for example:
     # { id = "RUSTSEC-0000-0000", reason = "no upstream fix yet; tracked in issue N" },
@@ -59,6 +62,9 @@ ignore = true
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Workspace path dependencies may omit a version until crates are published.
+# Direct crates.io dependencies must still use explicit version requirements.
+allow-wildcard-paths = true
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"

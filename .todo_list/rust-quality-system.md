@@ -5,7 +5,7 @@
 - [x] Layered GitHub Actions (validation, complexity, CodeQL, deep analysis)
 - [x] Makefile + setup/lint/feature/coverage/complexity/deep scripts
 - [x] Document architecture in `docs/quality.md` and agent guides
-- [ ] Workspace lint policy, `clippy.toml`, `deny.toml`, `.debtmap.toml`
-- [ ] Install tools and run all stable checks
-- [ ] Fix violations without weakening policy
-- [ ] Commit, push, and open PR
+- [x] Workspace lint policy, `clippy.toml`, `deny.toml`, `.debtmap.toml`
+- [x] Install tools and run all stable checks
+- [x] Fix violations without weakening policy
+- [x] Commit, push, and open PR

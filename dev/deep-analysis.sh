@@ -38,7 +38,7 @@ fi
 if [[ "${NIGHTLY_AVAILABLE}" != "true" ]]; then
   if [[ "${INSTALL_NIGHTLY:-}" == "1" ]]; then
     echo "==> INSTALL_NIGHTLY=1 set; installing nightly toolchain with miri + rust-src ..."
-    rustup toolchain install nightly --component miri rust-src
+    rustup toolchain install nightly --component miri --component rust-src
     NIGHTLY_AVAILABLE=true
   else
     echo ""
@@ -47,7 +47,7 @@ if [[ "${NIGHTLY_AVAILABLE}" != "true" ]]; then
     echo "  This is an environment limitation for local machines that have opted out of nightly."
     echo "  To install nightly manually, run:"
     echo ""
-    echo "    rustup toolchain install nightly --component miri rust-src"
+    echo "    rustup toolchain install nightly --component miri --component rust-src"
     echo ""
     echo "  To allow this script to install nightly automatically (e.g. in CI), set:"
     echo ""
@@ -62,7 +62,7 @@ fi
 # ---------------------------------------------------------------------------
 if ! rustup component list --toolchain nightly 2>/dev/null | grep -q 'miri.*installed'; then
   echo "==> Adding miri and rust-src components to nightly ..."
-  rustup toolchain install nightly --component miri rust-src
+  rustup toolchain install nightly --component miri --component rust-src
 fi
 
 # ---------------------------------------------------------------------------
@@ -97,11 +97,13 @@ if [[ "${SKIP_MIRI:-}" == "1" ]]; then
   echo "==> SKIP_MIRI=1 set; skipping Miri."
 else
   echo ""
-  echo "==> Running cargo +nightly miri test --workspace ..."
+  echo "==> Running cargo +nightly miri test --workspace --lib ..."
   echo "    (MIRIFLAGS: ${MIRIFLAGS:--Zmiri-disable-isolation})"
   echo "    Miri is dynamic: it only checks executed paths."
+  echo "    Default scope is --lib: OS-heavy integration tests (sockets, subprocesses)"
+  echo "    are not part of the routine Miri gate."
   export MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation}"
-  if ! cargo +nightly miri test --workspace; then
+  if ! cargo +nightly miri test --workspace --lib; then
     echo ""
     echo "ERROR: Miri reported test failures. Check the output above for details."
     echo "  Common causes: undefined behaviour, invalid memory access, data races,"

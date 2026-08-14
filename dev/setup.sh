@@ -99,4 +99,4 @@ done
 echo ""
 echo "  NOTE: nightly Rust (miri, cargo-udeps) is NOT installed by default."
 echo "        'make deep-analysis' requires nightly. Set INSTALL_NIGHTLY=1 or"
-echo "        run: rustup toolchain install nightly --component miri rust-src"
+echo "        run: rustup toolchain install nightly --component miri --component rust-src"
