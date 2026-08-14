@@ -1625,7 +1625,7 @@ mcp:
 | Loopback | MAY run without auth |
 | Non-loopback bind | REQUIRES `Authorization: Bearer <token>` where token comes from env `SHAPEPORT_MCP_TOKEN` or equivalent config |
 | Missing/invalid token on non-loopback | MUST deny (401) |
-| `Origin` header | MUST be validated against configured allowlist; mismatch → **403** |
+| `Origin` header | When an allowlist is configured, a **present** `Origin` that does not match MUST be **403**. Requests **without** `Origin` (typical non-browser MCP clients) MUST still be accepted. Matching follows RFC 6454 `(scheme, host, port)` as implemented by `rmcp`. |
 | Protocol | Stateless Streamable HTTP only; no legacy HTTP+SSE |
 
 ### 17.7 stdio rules

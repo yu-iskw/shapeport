@@ -13,13 +13,10 @@ rust-version.workspace = true
 
 [dependencies]
 axum.workspace = true
-chrono.workspace = true
-hex.workspace = true
 rmcp.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 shapeport-core = { path = "../shapeport-core" }
 tokio.workspace = true
 

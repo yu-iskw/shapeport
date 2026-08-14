@@ -371,10 +371,18 @@ fn eval_binary(left: &SqlExpr, op: &BinaryOperator, right: &SqlExpr, row: &Value
     match op {
         BinaryOperator::Eq => Ok(Value::Bool(values_equal(&lv, &rv))),
         BinaryOperator::NotEq => Ok(Value::Bool(!values_equal(&lv, &rv))),
-        BinaryOperator::Gt => Ok(Value::Bool(cmp_rank(&lv) > cmp_rank(&rv))),
-        BinaryOperator::Lt => Ok(Value::Bool(cmp_rank(&lv) < cmp_rank(&rv))),
-        BinaryOperator::GtEq => Ok(Value::Bool(cmp_rank(&lv) >= cmp_rank(&rv))),
-        BinaryOperator::LtEq => Ok(Value::Bool(cmp_rank(&lv) <= cmp_rank(&rv))),
+        BinaryOperator::Gt => Ok(Value::Bool(
+            values_cmp(&lv, &rv) == std::cmp::Ordering::Greater,
+        )),
+        BinaryOperator::Lt => Ok(Value::Bool(
+            values_cmp(&lv, &rv) == std::cmp::Ordering::Less,
+        )),
+        BinaryOperator::GtEq => Ok(Value::Bool(
+            values_cmp(&lv, &rv) != std::cmp::Ordering::Less,
+        )),
+        BinaryOperator::LtEq => Ok(Value::Bool(
+            values_cmp(&lv, &rv) != std::cmp::Ordering::Greater,
+        )),
         BinaryOperator::And => Ok(Value::Bool(lv.is_truthy() && rv.is_truthy())),
         BinaryOperator::Or => Ok(Value::Bool(lv.is_truthy() || rv.is_truthy())),
         BinaryOperator::Plus => Ok(Value::Float(value_f64(&lv)? + value_f64(&rv)?)),
@@ -436,8 +444,26 @@ fn stringify(value: &Value) -> String {
     }
 }
 
-fn cmp_rank(value: &Value) -> String {
-    stringify(value)
+fn numeric_rank(value: &Value) -> Option<f64> {
+    match value {
+        Value::Int(v) => Some(i64_to_f64(*v)),
+        Value::UInt(v) => Some(*v as f64),
+        Value::Float(v) => Some(*v),
+        Value::Decimal(dec) => dec.to_canonical_string().parse().ok(),
+        _ => None,
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn i64_to_f64(value: i64) -> f64 {
+    value as f64
+}
+
+fn values_cmp(left: &Value, right: &Value) -> std::cmp::Ordering {
+    match (numeric_rank(left), numeric_rank(right)) {
+        (Some(left_n), Some(right_n)) => left_n.total_cmp(&right_n),
+        _ => stringify(left).cmp(&stringify(right)),
+    }
 }
 
 fn value_f64(value: &Value) -> Result<f64> {
@@ -474,7 +500,7 @@ fn sort_by(order: &OrderBy, rows: &mut [Value]) -> Result<()> {
         for item in exprs {
             let lv = eval_expr(&item.expr, a).unwrap_or(Value::Null);
             let rv = eval_expr(&item.expr, b).unwrap_or(Value::Null);
-            let mut ord = cmp_rank(&lv).cmp(&cmp_rank(&rv));
+            let mut ord = values_cmp(&lv, &rv);
             if item.options.asc == Some(false) {
                 ord = ord.reverse();
             }

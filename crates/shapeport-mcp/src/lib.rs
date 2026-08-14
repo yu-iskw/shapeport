@@ -8,7 +8,6 @@ use axum::Router;
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
-use chrono::Utc;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::transport::stdio;
@@ -17,7 +16,6 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{ServerHandler, ServiceExt, schemars, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use sha2::{Digest, Sha256};
 use shapeport_core::config::{InferMode, RuntimeConfig};
 use shapeport_core::formats::FormatId;
 use shapeport_core::plan::{ErrorPolicy, TransformationPlan, parse_plan_json};
@@ -25,7 +23,7 @@ use shapeport_core::{
     ConvertRequest, InspectRequest, PlanRequest, PlannerMode, QueryRequest, SourceSpec,
     TransformRequest, ValidateRequest, Value, convert_data, inspect_source, plan_mapping,
     query_sources, schema_as_json, schema_fingerprint, schema_from_json_value, transform_data,
-    validate_data,
+    validate_data, write_artifact,
 };
 use tokio::net::TcpListener;
 
@@ -547,13 +545,6 @@ fn make_receipt(rows: u64, bytes: u64, format: FormatId) -> JsonValue {
     })
 }
 
-fn artifact_expires_at(ttl_secs: u64) -> String {
-    let delta = i64::try_from(ttl_secs).unwrap_or(i64::MAX);
-    Utc::now()
-        .checked_add_signed(chrono::Duration::seconds(delta))
-        .map_or_else(|| Utc::now().to_rfc3339(), |dt| dt.to_rfc3339())
-}
-
 fn pack_data(
     result: &shapeport_core::TransformResult,
     format: FormatId,
@@ -587,36 +578,25 @@ fn pack_artifact(
     bytes: u64,
     diagnostics: Vec<JsonValue>,
 ) -> Result<Json<DataOut>, Json<ToolErrorOut>> {
-    let digest = hex::encode(Sha256::digest(&result.bytes));
-    let dir = config
-        .filesystem
-        .write_roots
-        .first()
-        .cloned()
-        .unwrap_or_else(|| std::path::PathBuf::from(".shapeport"));
-    let path = dir.join("artifacts").join(&digest);
-    path.parent()
-        .map(|parent| {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| tool_fail(shapeport_core::Error::io_err(e.to_string())))
-        })
-        .transpose()?;
-    std::fs::write(&path, &result.bytes)
-        .map_err(|e| tool_fail(shapeport_core::Error::io_err(e.to_string())))?;
+    let meta = write_artifact(&result.bytes, config).map_err(tool_fail)?;
     let schema_fp = result.schema.as_ref().map(schema_fingerprint);
-    let expires_at = artifact_expires_at(config.mcp.artifact_ttl_secs);
+    let local_path = if config.mcp.local_filesystem {
+        Some(meta.path.to_string_lossy().into_owned())
+    } else {
+        None
+    };
     Ok(Json(DataOut {
         status: "ok".into(),
         result: None,
         artifact: Some(ArtifactOut {
-            uri: format!("shapeport-artifact://{digest}"),
+            uri: format!("shapeport-artifact://{}", meta.digest),
             format: format.as_str().into(),
             bytes,
             rows,
-            sha256: digest,
+            sha256: meta.digest,
             schema_fingerprint: schema_fp,
-            expires_at: Some(expires_at),
-            local_path: None, // set when config.mcp.local_filesystem is true
+            expires_at: Some(meta.expires_at),
+            local_path,
         }),
         receipt: Some(make_receipt(rows, bytes, format)),
         diagnostics,

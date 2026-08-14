@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::{InferMode, RuntimeConfig};
 use crate::diagnostics::Diagnostic;
-use crate::engine::execute_plan;
+use crate::engine::{RejectedRecord, execute_detailed};
 use crate::error::{Error, Result};
 use crate::fingerprint::schema_fingerprint;
 use crate::formats::{
@@ -21,24 +21,6 @@ use crate::query::execute_sql;
 use crate::schema::Schema;
 use crate::security::{read_artifact, read_limited, resolve_read_path, resolve_write_path};
 use crate::value::Value;
-
-/// A record that was rejected during execution, with its index and reason.
-#[derive(Clone, Debug)]
-pub struct RejectedRecord {
-    /// Zero-based index of the rejected record in the input.
-    pub index: usize,
-    /// Diagnostic describing why the record was rejected.
-    pub diagnostic: Diagnostic,
-}
-
-/// Detailed output from plan execution (fallback — full version lives in engine).
-#[derive(Clone, Debug)]
-pub struct ExecuteOutcome {
-    /// Records that passed transformation.
-    pub records: Vec<Value>,
-    /// Records that were rejected (with cause).
-    pub rejects: Vec<RejectedRecord>,
-}
 
 #[derive(Clone, Debug)]
 pub struct SourceSpec {
@@ -188,28 +170,32 @@ pub fn transform_data(
     let plan = resolve_plan(request, &records, config)?;
     let mut plan = plan;
     plan.execution.error_policy = request.error_policy;
-    // execute_detailed not yet in engine; use execute_plan with empty rejects.
-    let out = execute_plan(&plan, records)?;
+    let outcome = execute_detailed(&plan, records)?;
     if let Some(schema) = &request.target_schema
         && plan.validation.output != "none"
     {
-        for record in &out {
+        for record in &outcome.records {
             validate_value(schema, record)?;
         }
     }
-    let encoded = encode_records(&out, request.output_format)?;
+    let encoded = encode_records(&outcome.records, request.output_format)?;
     if encoded.len() as u64 > config.limits.max_output_bytes {
         return Err(Error::limit(
             "max_output_bytes",
             "encoded output exceeds maxOutputBytes",
         ));
     }
+    let diagnostics: Vec<Diagnostic> = outcome
+        .rejects
+        .iter()
+        .map(|reject| reject.diagnostic.clone())
+        .collect();
     Ok(TransformResult {
-        records: out,
+        records: outcome.records,
         bytes: encoded,
         schema: request.target_schema.clone(),
-        diagnostics: Vec::new(),
-        rejects: Vec::new(),
+        diagnostics,
+        rejects: outcome.rejects,
     })
 }
 
@@ -362,6 +348,14 @@ pub fn convert_data(request: &ConvertRequest, config: &RuntimeConfig) -> Result<
 }
 
 pub fn schema_from_json_value(value: &serde_json::Value) -> Result<Schema> {
+    if value
+        .get("root")
+        .and_then(|root| root.get("kind"))
+        .is_some()
+    {
+        return serde_json::from_value(value.clone())
+            .map_err(|err| Error::schema("schema_json", err.to_string()));
+    }
     schema_from_json_schema(value)
 }
 
@@ -463,10 +457,9 @@ pub(crate) fn value_depth(value: &Value) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ExecuteOutcome, InspectRequest, RejectedRecord, SourceSpec, inspect_source, value_depth,
-    };
+    use super::{InspectRequest, SourceSpec, inspect_source, value_depth};
     use crate::config::{InferMode, RuntimeConfig};
+    use crate::engine::{ExecuteOutcome, RejectedRecord};
     use crate::formats::FormatId;
     use crate::security::write_artifact;
     use crate::value::Value;

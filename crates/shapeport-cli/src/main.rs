@@ -180,10 +180,10 @@ fn main() -> ExitCode {
 fn run() -> shapeport_core::Result<()> {
     let cli = Cli::parse();
     let mut config = RuntimeConfig::default().with_cwd_roots(std::env::current_dir()?);
-    apply_env_vars(&mut config);
     if let Some(path) = cli.config {
         apply_yaml_config(&path, &mut config)?;
     }
+    apply_env_vars(&mut config);
     dispatch(cli.command, config)
 }
 
@@ -206,23 +206,20 @@ fn apply_env_vars(config: &mut RuntimeConfig) {
 }
 
 fn apply_yaml_config(path: &PathBuf, config: &mut RuntimeConfig) -> shapeport_core::Result<()> {
-    let raw = std::fs::read(path)?;
-    let value: serde_json::Value =
-        serde_yml::from_slice(&raw).map_err(|err| Error::parse("config_yaml", err.to_string()))?;
-    if let Some(mcp) = value.get("mcp") {
-        if let Some(origins) = mcp.get("allowedOrigins").and_then(|v| v.as_array()) {
-            let list: Vec<String> = origins
-                .iter()
-                .filter_map(|v| v.as_str().map(ToOwned::to_owned))
-                .collect();
-            config.mcp.origin_allowlist = list;
-        }
-        if let Some(token) = mcp.get("bearerToken").and_then(|v| v.as_str()) {
-            if !token.is_empty() {
-                config.mcp.bearer_token = Some(token.to_owned());
-            }
-        }
+    let mut loaded = RuntimeConfig::load_yaml(path)?;
+    if loaded.filesystem.read_roots.is_empty() {
+        loaded
+            .filesystem
+            .read_roots
+            .clone_from(&config.filesystem.read_roots);
     }
+    if loaded.filesystem.write_roots.is_empty() {
+        loaded
+            .filesystem
+            .write_roots
+            .clone_from(&config.filesystem.write_roots);
+    }
+    *config = loaded;
     Ok(())
 }
 

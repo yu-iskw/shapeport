@@ -20,6 +20,25 @@ fn config_with_origins(origins: Vec<String>) -> RuntimeConfig {
     cfg
 }
 
+async fn wait_for_connect(addr: SocketAddr) -> std::io::Result<tokio::net::TcpStream> {
+    let mut last_err = None;
+    for _ in 0..20 {
+        match tokio::net::TcpStream::connect(addr).await {
+            Ok(stream) => return Ok(stream),
+            Err(err) => {
+                last_err = Some(err);
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "server did not start",
+        )
+    }))
+}
+
 // ---------------------------------------------------------------------------
 // Non-loopback without token → serve_http returns Err mentioning SHAPEPORT_MCP_TOKEN
 // ---------------------------------------------------------------------------
@@ -64,13 +83,7 @@ async fn origin_check_rejects_disallowed_origin() {
         let _ = shapeport_mcp::serve_http(addr, cfg).await;
     });
 
-    // Give the server a moment to start
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    // Send a POST to /mcp with an evil Origin header (no auth needed for this check)
-    let client = tokio::net::TcpStream::connect(addr)
-        .await
-        .expect("connect failed");
+    let client = wait_for_connect(addr).await.expect("connect failed");
     let (mut reader, mut writer) = client.into_split();
 
     let request = format!(

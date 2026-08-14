@@ -1624,7 +1624,6 @@ dependencies = [
  "shapeport-core",
  "shapeport-mcp",
  "tokio",
- "tracing",
  "tracing-subscriber",
 ]
 
@@ -1658,13 +1657,10 @@ name = "shapeport-mcp"
 version = "0.1.0"
 dependencies = [
  "axum",
- "chrono",
- "hex",
  "rmcp",
  "schemars",
  "serde",
  "serde_json",
- "sha2",
  "shapeport-core",
  "tokio",
 ]
