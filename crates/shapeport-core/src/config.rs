@@ -138,7 +138,7 @@ impl RuntimeConfig {
 
     /// Parse configuration from a YAML string, overlaying onto defaults.
     pub fn from_yaml_str(raw: &str) -> crate::error::Result<Self> {
-        let file: FileConfig = serde_yml::from_str(raw)
+        let file: FileConfig = serde_norway::from_str(raw)
             .map_err(|e| crate::error::Error::parse("yaml_config", e.to_string()))?;
         Ok(file.into_runtime())
     }

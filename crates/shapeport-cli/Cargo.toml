@@ -14,9 +14,9 @@ rust-version.workspace = true
 [dependencies]
 clap.workspace = true
 serde_json.workspace = true
-serde_yml.workspace = true
-shapeport-core = { path = "../shapeport-core" }
-shapeport-mcp = { path = "../shapeport-mcp" }
+serde_norway.workspace = true
+shapeport-core = { path = "../shapeport-core", version = "0.1.0" }
+shapeport-mcp = { path = "../shapeport-mcp", version = "0.1.0" }
 tokio.workspace = true
 tracing-subscriber.workspace = true
 

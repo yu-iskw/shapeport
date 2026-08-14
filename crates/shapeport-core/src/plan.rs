@@ -328,8 +328,8 @@ pub fn parse_plan_json(raw: &str) -> Result<TransformationPlan> {
 
 pub fn parse_plan_bytes(raw: &[u8], as_yaml: bool) -> Result<TransformationPlan> {
     if as_yaml {
-        let value: serde_json::Value =
-            serde_yml::from_slice(raw).map_err(|err| Error::parse("yaml_plan", err.to_string()))?;
+        let value: serde_json::Value = serde_norway::from_slice(raw)
+            .map_err(|err| Error::parse("yaml_plan", err.to_string()))?;
         let plan: TransformationPlan = serde_json::from_value(value)?;
         plan.validate_shape()?;
         return Ok(plan);
