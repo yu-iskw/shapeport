@@ -387,6 +387,10 @@ cases:
                   nullable: false
             nullable: false
     expect:
-      status: ambiguous
-      ambiguousTargets: [person]
-      unsafeAutoMapping: false
+      status: ready
+      mappings:
+        person.firstName: first_name
+        person.lastName: last_name
+      reasonKinds:
+        person.firstName: [normalized-name match, exact type match]
+        person.lastName: [normalized-name match, exact type match]
