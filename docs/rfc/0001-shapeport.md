@@ -1,16 +1,16 @@
 # RFC 0001: ShapePort — Schema-Driven Data Transformation Runtime
 
-| Field | Value |
-| --- | --- |
-| **Status** | Accepted |
-| **Authors** | ShapePort contributors |
-| **Last Updated** | 2026-08-14 |
-| **RFC Number** | 0001 |
-| **Target** | v0.1 implementation contract |
-| **Repository** | `shapeport` |
-| **Primary language** | Rust (edition 2024) |
-| **License** | Apache-2.0 |
-| **Audience** | maintainers, contributors, implementers, security reviewers |
+| Field                | Value                                                       |
+| -------------------- | ----------------------------------------------------------- |
+| **Status**           | Accepted                                                    |
+| **Authors**          | ShapePort contributors                                      |
+| **Last Updated**     | 2026-08-14                                                  |
+| **RFC Number**       | 0001                                                        |
+| **Target**           | v0.1 implementation contract                                |
+| **Repository**       | `shapeport`                                                 |
+| **Primary language** | Rust (edition 2024)                                         |
+| **License**          | Apache-2.0                                                  |
+| **Audience**         | maintainers, contributors, implementers, security reviewers |
 
 This document is the **normative implementation contract** for ShapePort v0.1. Where this RFC conflicts with earlier drafts, this document wins. Requirements use RFC 2119 language: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
@@ -18,33 +18,33 @@ This document is the **normative implementation contract** for ShapePort v0.1. W
 
 ## Revision history
 
-| Date | Change |
-| --- | --- |
-| 2026-08-14 | Initial draft (architecture proposal; dual DataFusion/document backends; nine-crate layout; open path/SQL/auth questions). |
+| Date       | Change                                                                                                                                                                                                                                                                                                                       |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-14 | Initial draft (architecture proposal; dual DataFusion/document backends; nine-crate layout; open path/SQL/auth questions).                                                                                                                                                                                                   |
 | 2026-08-14 | **Accepted revision** after adversarial architecture review. Locked decisions R1–R18 below are now normative. Fake numeric decision-matrix scores removed. Crate layout reduced to three crates. Single document-VM execution backend. MCP tools renamed and fully contracted for MCP specification 2026-07-28 + `rmcp` 3.x. |
 
 ### Adversarial findings closed (normative lock)
 
-| ID | Finding | Lock |
-| --- | --- | --- |
-| R1 | JSONPath in plans is underspecified and unsafe | FieldPath only: `field`, `field.sub`, `field[N]`. No `$`, no filters, no recursive descent. Plans MUST NOT store JSONPath. |
-| R2 | YAML-as-canonical plan is ambiguous | Canonical plan serialization is JSON UTF-8. YAML is CLI convenience that round-trips through the JSON model. Plan JSON Schema envelope is documented. |
-| R3 | Silent hybrid DataFusion/document execution | Single execution backend for this release: **document VM**. Columnar sources decode to record values then execute. No silent hybrid. `execution.backend` MAY exist later; default is `document`. |
-| R4 | Result key order / decimal JSON encoding undefined | Object key order is insertion/plan order; JSON sinks emit plan field order; decimal as string in JSON; `decimal→float64` requires `policy: lossy`. |
-| R5 | Non-determinism risks | Record order = input order unless `sort`; `sort` requires explicit keys + nulls policy (`nulls: last` default); no non-deterministic functions in default registry. |
-| R6 | MCP tool names and schemas incomplete | Underscore namespaced tools with required `inputSchema` and `outputSchema`. |
-| R7 | Ambient `file://` in MCP results | Content-addressed `shapeport-artifact://<sha256-hex>`; no ambient `file://` unless client capability `localFilesystem` is true. |
-| R8 | HTTP auth/bind underspecified | Default bind `127.0.0.1`; loopback MAY run without auth; non-loopback REQUIRES Bearer token; Origin validated (mismatch → 403). |
-| R9 | DataFusion SQL filesystem table functions bypass policy | Default query is bounded SQL subset over in-memory records (`sqlparser`). DataFusion is a future optional `QueryBackend`. |
-| R10 | Plan op surface too large for v0.1 | Ops: `project`, `rename`, `drop`, `literal`, `cast`, `coalesce`, `object`, `map`, `filter`, `sort`, `explode`. Defer `join`/`aggregate` in plan IR (use `query` SQL). |
-| R11 | CSV nested output policies invite silent loss | CSV nested output policy: `error` only in this release. |
-| R12 | Protobuf auto-detect is unsafe | Protobuf deferred (not in this release). When added: descriptor required; one message per file; no auto-detect. |
-| R13 | Inference can destroy identifiers | Conservative never promotes leading-zero numerics; empty CSV field → null iff `""` is a null spelling else string; mid-stream type conflict in conservative → fail. |
-| R14 | Flint demo lossy float cast | Flint demo uses string or numeric JSON for revenue; float only with explicit `policy: lossy`. |
-| R15 | Schema fingerprint undefined | SHA-256 over canonical JSON of schema AST excluding `metadata`. Format `sha256:<hex>`. |
-| R16 | Self-scoring 96-everywhere matrix | Replaced with qualitative tradeoff table. |
-| R17 | Normative plan still used `$` paths | One normative plan example using FieldPath only. |
-| R18 | Clippy pedantic + complexity 10 | Design constraint: small functions, option structs, visitors/tables. |
+| ID  | Finding                                                 | Lock                                                                                                                                                                                             |
+| --- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1  | JSONPath in plans is underspecified and unsafe          | FieldPath only: `field`, `field.sub`, `field[N]`. No `$`, no filters, no recursive descent. Plans MUST NOT store JSONPath.                                                                       |
+| R2  | YAML-as-canonical plan is ambiguous                     | Canonical plan serialization is JSON UTF-8. YAML is CLI convenience that round-trips through the JSON model. Plan JSON Schema envelope is documented.                                            |
+| R3  | Silent hybrid DataFusion/document execution             | Single execution backend for this release: **document VM**. Columnar sources decode to record values then execute. No silent hybrid. `execution.backend` MAY exist later; default is `document`. |
+| R4  | Result key order / decimal JSON encoding undefined      | Object key order is insertion/plan order; JSON sinks emit plan field order; decimal as string in JSON; `decimal→float64` requires `policy: lossy`.                                               |
+| R5  | Non-determinism risks                                   | Record order = input order unless `sort`; `sort` requires explicit keys + nulls policy (`nulls: last` default); no non-deterministic functions in default registry.                              |
+| R6  | MCP tool names and schemas incomplete                   | Underscore namespaced tools with required `inputSchema` and `outputSchema`.                                                                                                                      |
+| R7  | Ambient `file://` in MCP results                        | Content-addressed `shapeport-artifact://<sha256-hex>`; no ambient `file://` unless client capability `localFilesystem` is true.                                                                  |
+| R8  | HTTP auth/bind underspecified                           | Default bind `127.0.0.1`; loopback MAY run without auth; non-loopback REQUIRES Bearer token; Origin validated (mismatch → 403).                                                                  |
+| R9  | DataFusion SQL filesystem table functions bypass policy | Default query is bounded SQL subset over in-memory records (`sqlparser`). DataFusion is a future optional `QueryBackend`.                                                                        |
+| R10 | Plan op surface too large for v0.1                      | Ops: `project`, `rename`, `drop`, `literal`, `cast`, `coalesce`, `object`, `map`, `filter`, `sort`, `explode`. Defer `join`/`aggregate` in plan IR (use `query` SQL).                            |
+| R11 | CSV nested output policies invite silent loss           | CSV nested output policy: `error` only in this release.                                                                                                                                          |
+| R12 | Protobuf auto-detect is unsafe                          | Protobuf deferred (not in this release). When added: descriptor required; one message per file; no auto-detect.                                                                                  |
+| R13 | Inference can destroy identifiers                       | Conservative never promotes leading-zero numerics; empty CSV field → null iff `""` is a null spelling else string; mid-stream type conflict in conservative → fail.                              |
+| R14 | Flint demo lossy float cast                             | Flint demo uses string or numeric JSON for revenue; float only with explicit `policy: lossy`.                                                                                                    |
+| R15 | Schema fingerprint undefined                            | SHA-256 over canonical JSON of schema AST excluding `metadata`. Format `sha256:<hex>`.                                                                                                           |
+| R16 | Self-scoring 96-everywhere matrix                       | Replaced with qualitative tradeoff table.                                                                                                                                                        |
+| R17 | Normative plan still used `$` paths                     | One normative plan example using FieldPath only.                                                                                                                                                 |
+| R18 | Clippy pedantic + complexity 10                         | Design constraint: small functions, option structs, visitors/tables.                                                                                                                             |
 
 ---
 
@@ -193,13 +193,13 @@ Implementation MUST keep `cargo clippy --workspace --all-targets --all-features 
 
 Scores-as-proof are forbidden. The following is a qualitative comparison of candidate architectures against ShapePort requirements:
 
-| Approach | Schema→schema planning | Nested documents | Columnar formats | Deterministic reusable plans | Agent/MCP ergonomics | Safety / policy surface | Fit for v0.1 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Generated `jq` | Weak (external DSL) | Strong | Weak (forces JSON) | Weak | Medium | Medium | Poor as canonical IR |
-| JSONata | Weak–medium | Strong | Weak | Medium | Medium | Medium | Poor as canonical IR |
-| DuckDB / SQL-only | Weak for nested targets | Awkward | Strong | Medium (SQL text) | Medium | Needs strict source policy | Good for query, not plan IR |
-| DataFusion SQL-only | Weak for nested targets | Awkward | Strong | Medium | Medium | Needs strict source policy | Future optional query backend |
-| **ShapePort Plan IR + document VM** | **Primary strength** | **Native** | Decode-then-execute | **Native** | **Native** | **Controllable** | **Selected** |
+| Approach                            | Schema→schema planning  | Nested documents | Columnar formats    | Deterministic reusable plans | Agent/MCP ergonomics | Safety / policy surface    | Fit for v0.1                  |
+| ----------------------------------- | ----------------------- | ---------------- | ------------------- | ---------------------------- | -------------------- | -------------------------- | ----------------------------- |
+| Generated `jq`                      | Weak (external DSL)     | Strong           | Weak (forces JSON)  | Weak                         | Medium               | Medium                     | Poor as canonical IR          |
+| JSONata                             | Weak–medium             | Strong           | Weak                | Medium                       | Medium               | Medium                     | Poor as canonical IR          |
+| DuckDB / SQL-only                   | Weak for nested targets | Awkward          | Strong              | Medium (SQL text)            | Medium               | Needs strict source policy | Good for query, not plan IR   |
+| DataFusion SQL-only                 | Weak for nested targets | Awkward          | Strong              | Medium                       | Medium               | Needs strict source policy | Future optional query backend |
+| **ShapePort Plan IR + document VM** | **Primary strength**    | **Native**       | Decode-then-execute | **Native**                   | **Native**           | **Controllable**           | **Selected**                  |
 
 **Selected architecture for v0.1:** ShapePort Core Schema + planner + versioned Plan IR + single document VM. Apache Arrow crates MAY be used as **format codecs** for Parquet/Arrow IPC. Apache DataFusion MUST NOT be required in the default build; it MAY appear later as an optional `QueryBackend`.
 
@@ -231,11 +231,11 @@ shapeport/
 
 ### 5.1 Dependency rules
 
-| Crate | MAY depend on | MUST NOT depend on |
-| --- | --- | --- |
-| `shapeport-core` | serde, format codecs, sqlparser, tracing, etc. | `rmcp`, CLI frameworks as public API |
-| `shapeport-mcp` | `shapeport-core`, `rmcp` 3.x, tokio, axum/hyper as needed by rmcp | plan semantics definitions of its own |
-| `shapeport-cli` | `shapeport-core`, `shapeport-mcp` (for `serve`), clap | reimplementing core logic |
+| Crate            | MAY depend on                                                     | MUST NOT depend on                    |
+| ---------------- | ----------------------------------------------------------------- | ------------------------------------- |
+| `shapeport-core` | serde, format codecs, sqlparser, tracing, etc.                    | `rmcp`, CLI frameworks as public API  |
+| `shapeport-mcp`  | `shapeport-core`, `rmcp` 3.x, tokio, axum/hyper as needed by rmcp | plan semantics definitions of its own |
+| `shapeport-cli`  | `shapeport-core`, `shapeport-mcp` (for `serve`), clap             | reimplementing core logic             |
 
 MCP tool handlers MUST call core application services. Plan IR types, validation, and execution semantics live only in `shapeport-core`.
 
@@ -256,17 +256,17 @@ This is an internal layout guideline, not a requirement to publish separate crat
 
 ### 6.1 In-scope for v0.1
 
-| Area | Requirement |
-| --- | --- |
-| CLI | `inspect`, `schema`, `plan`, `transform`, `validate`, `query`, `convert`, `serve` |
-| Formats | JSON, JSONL, YAML (**data-mode only**), CSV, TSV, Parquet, Arrow IPC |
-| Schemas | JSON Schema 2020-12 practical subset; Arrow/Parquet-derived schemas; inferred schemas |
-| Planner | Modes `strict`, `smart` only (no semantic/LLM provider) |
-| Explain | Human and machine explain output for plans |
-| Security | Filesystem roots + resource limits |
-| Telemetry | `tracing` spans; OpenTelemetry exporter optional |
-| Fixtures | Flint-shaped golden fixture |
-| MCP | stdio + stateless Streamable HTTP as specified in §16 |
+| Area      | Requirement                                                                           |
+| --------- | ------------------------------------------------------------------------------------- |
+| CLI       | `inspect`, `schema`, `plan`, `transform`, `validate`, `query`, `convert`, `serve`     |
+| Formats   | JSON, JSONL, YAML (**data-mode only**), CSV, TSV, Parquet, Arrow IPC                  |
+| Schemas   | JSON Schema 2020-12 practical subset; Arrow/Parquet-derived schemas; inferred schemas |
+| Planner   | Modes `strict`, `smart` only (no semantic/LLM provider)                               |
+| Explain   | Human and machine explain output for plans                                            |
+| Security  | Filesystem roots + resource limits                                                    |
+| Telemetry | `tracing` spans; OpenTelemetry exporter optional                                      |
+| Fixtures  | Flint-shaped golden fixture                                                           |
+| MCP       | stdio + stateless Streamable HTTP as specified in §16                                 |
 
 ### 6.2 Out of scope (explicit)
 
@@ -333,15 +333,15 @@ Field order in `Record.fields` is schema field order and MUST be preserved throu
 
 ### 7.3 Schema adapters (v0.1)
 
-| Adapter | Status |
-| --- | --- |
-| JSON Schema 2020-12 (practical subset) | Required |
-| Arrow Schema | Required (for Parquet/Arrow IPC) |
-| Parquet Schema | Required |
-| Inferred delimited-record schema | Required |
-| Inferred JSON/JSONL schema | Required |
-| Protobuf descriptors | Deferred (R12) |
-| Avro / OpenAPI | Out of scope |
+| Adapter                                | Status                           |
+| -------------------------------------- | -------------------------------- |
+| JSON Schema 2020-12 (practical subset) | Required                         |
+| Arrow Schema                           | Required (for Parquet/Arrow IPC) |
+| Parquet Schema                         | Required                         |
+| Inferred delimited-record schema       | Required                         |
+| Inferred JSON/JSONL schema             | Required                         |
+| Protobuf descriptors                   | Deferred (R12)                   |
+| Avro / OpenAPI                         | Out of scope                     |
 
 ### 7.4 JSON Schema support (practical subset)
 
@@ -473,11 +473,11 @@ Parquet and Arrow IPC SHOULD use format-specific signatures/probes. Protobuf MUS
 
 ### 10.1 Modes
 
-| Mode | Behavior |
-| --- | --- |
-| `none` | Delimited fields remain strings unless explicit schema exists |
-| `conservative` (default) | Infer only when evidence is strong |
-| `aggressive` | Broader heuristics for timestamps/dates/numerics/booleans |
+| Mode                     | Behavior                                                      |
+| ------------------------ | ------------------------------------------------------------- |
+| `none`                   | Delimited fields remain strings unless explicit schema exists |
+| `conservative` (default) | Infer only when evidence is strong                            |
+| `aggressive`             | Broader heuristics for timestamps/dates/numerics/booleans     |
 
 ### 10.2 Conservative rules (normative)
 
@@ -509,23 +509,23 @@ The IR MUST be typed, deterministic, serializable, versioned, validated before e
 
 ### 11.3 Operation set for this release (R10)
 
-| Op | In v0.1 plan IR? | Notes |
-| --- | --- | --- |
-| `project` | YES | Select fields |
-| `rename` | YES | Rename fields |
-| `drop` | YES | Remove fields |
-| `literal` | YES | Constant value |
-| `cast` | YES | Type conversion with policy |
-| `coalesce` | YES | First non-null |
-| `object` | YES | Construct object (plan field order) |
-| `map` | YES | Record field mapping (not collection map/fn) |
-| `filter` | YES | Retain records |
-| `sort` | YES | Requires explicit keys + nulls policy |
-| `explode` | YES | Array → records; empty array → zero records |
-| `join` | NO | Use `query` SQL |
-| `aggregate` | NO | Use `query` SQL |
-| `flatten` | NO | Deferred |
-| `array` construction as top-level op | NO | Use `object`/`map`/literals as needed; list values MAY appear inside expressions as literals |
+| Op                                   | In v0.1 plan IR? | Notes                                                                                        |
+| ------------------------------------ | ---------------- | -------------------------------------------------------------------------------------------- |
+| `project`                            | YES              | Select fields                                                                                |
+| `rename`                             | YES              | Rename fields                                                                                |
+| `drop`                               | YES              | Remove fields                                                                                |
+| `literal`                            | YES              | Constant value                                                                               |
+| `cast`                               | YES              | Type conversion with policy                                                                  |
+| `coalesce`                           | YES              | First non-null                                                                               |
+| `object`                             | YES              | Construct object (plan field order)                                                          |
+| `map`                                | YES              | Record field mapping (not collection map/fn)                                                 |
+| `filter`                             | YES              | Retain records                                                                               |
+| `sort`                               | YES              | Requires explicit keys + nulls policy                                                        |
+| `explode`                            | YES              | Array → records; empty array → zero records                                                  |
+| `join`                               | NO               | Use `query` SQL                                                                              |
+| `aggregate`                          | NO               | Use `query` SQL                                                                              |
+| `flatten`                            | NO               | Deferred                                                                                     |
+| `array` construction as top-level op | NO               | Use `object`/`map`/literals as needed; list values MAY appear inside expressions as literals |
 
 ### 11.4 Expression model
 
@@ -613,7 +613,10 @@ Conceptual JSON Schema (2020-12) for the plan document:
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "errorPolicy": { "type": "string", "enum": ["fail", "skip", "collect"] },
+        "errorPolicy": {
+          "type": "string",
+          "enum": ["fail", "skip", "collect"]
+        },
         "backend": { "type": "string", "enum": ["document"] }
       }
     }
@@ -917,8 +920,12 @@ Warehouse-shaped records → Flint-shaped records. Paths are FieldPath only (no 
     }
   },
   "contracts": {
-    "input": { "fingerprint": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" },
-    "output": { "fingerprint": "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210" }
+    "input": {
+      "fingerprint": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "output": {
+      "fingerprint": "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+    }
   },
   "operations": [
     {
@@ -999,10 +1006,10 @@ Validation SHALL include:
 
 ### 12.1 Modes (v0.1)
 
-| Mode | Behavior |
-| --- | --- |
-| `strict` | High-confidence structural matches and explicitly allowed casts only |
-| `smart` | Adds deterministic normalization/heuristics (case folding style, aliases, safe coercions, path similarity, stats) |
+| Mode     | Behavior                                                                                                          |
+| -------- | ----------------------------------------------------------------------------------------------------------------- |
+| `strict` | High-confidence structural matches and explicitly allowed casts only                                              |
+| `smart`  | Adds deterministic normalization/heuristics (case folding style, aliases, safe coercions, path similarity, stats) |
 
 Semantic/LLM provider mode is **out of scope** for v0.1.
 
@@ -1092,13 +1099,13 @@ Object key order MUST be preserved as insertion/plan order through the VM.
 
 ### 13.3 Result canonicalization (R4)
 
-| Concern | Rule |
-| --- | --- |
-| Object key order | Insertion/plan order |
-| JSON / JSONL sinks | Emit objects with plan field order for mapped outputs |
-| Decimal in JSON | Encode as **string** |
-| `decimal → float64` | Requires `policy: lossy`; `strict` is an error |
-| Binary in JSON | Base64 string unless format options specify otherwise |
+| Concern             | Rule                                                  |
+| ------------------- | ----------------------------------------------------- |
+| Object key order    | Insertion/plan order                                  |
+| JSON / JSONL sinks  | Emit objects with plan field order for mapped outputs |
+| Decimal in JSON     | Encode as **string**                                  |
+| `decimal → float64` | Requires `policy: lossy`; `strict` is an error        |
+| Binary in JSON      | Base64 string unless format options specify otherwise |
 
 ### 13.4 Determinism (R5)
 
@@ -1213,18 +1220,18 @@ MUST reject:
 
 ### 17.1 Protocol and SDK requirements
 
-| Item | Requirement |
-| --- | --- |
-| Spec | MCP **2026-07-28** (major revision) |
-| SDK | Official Rust SDK **`rmcp` 3.x** (current published at acceptance: **3.1.2**) from https://github.com/modelcontextprotocol/rust-sdk |
-| Compatibility | Remain compatible with **2025-11-25** clients via SDK dual-support / negotiation where available |
-| Transports | **stdio** + **stateless Streamable HTTP** (SEP-2567) |
-| Schemas | JSON Schema **2020-12** for tool `inputSchema` and `outputSchema` via **`schemars`** |
-| `outputSchema` | **REQUIRED on every tool** (SEP-2106: any JSON Schema root type allowed) |
-| Routing headers | `Mcp-Method` / `Mcp-Name` (SEP-2243) — handled by `rmcp` |
-| Legacy HTTP+SSE | **MUST NOT** implement 2024-11-05 HTTP+SSE |
-| Handler model | Fresh handler per HTTP request; shared state via `Clone` handle |
-| Errors | Tool-level errors vs protocol errors per `rmcp` guidance |
+| Item            | Requirement                                                                                                                           |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Spec            | MCP **2026-07-28** (major revision)                                                                                                   |
+| SDK             | Official Rust SDK **`rmcp` 3.x** (current published at acceptance: **3.1.2**) from <https://github.com/modelcontextprotocol/rust-sdk> |
+| Compatibility   | Remain compatible with **2025-11-25** clients via SDK dual-support / negotiation where available                                      |
+| Transports      | **stdio** + **stateless Streamable HTTP** (SEP-2567)                                                                                  |
+| Schemas         | JSON Schema **2020-12** for tool `inputSchema` and `outputSchema` via **`schemars`**                                                  |
+| `outputSchema`  | **REQUIRED on every tool** (SEP-2106: any JSON Schema root type allowed)                                                              |
+| Routing headers | `Mcp-Method` / `Mcp-Name` (SEP-2243) — handled by `rmcp`                                                                              |
+| Legacy HTTP+SSE | **MUST NOT** implement 2024-11-05 HTTP+SSE                                                                                            |
+| Handler model   | Fresh handler per HTTP request; shared state via `Clone` handle                                                                       |
+| Errors          | Tool-level errors vs protocol errors per `rmcp` guidance                                                                              |
 
 Stateless Streamable HTTP means no reliance on protocol-level sessions / sticky `Mcp-Session-Id` as a required server mode for 2026-07-28. Cross-request state MUST use explicit artifact handles or equivalent tool arguments, not ambient sessions.
 
@@ -1232,15 +1239,15 @@ Stateless Streamable HTTP means no reliance on protocol-level sessions / sticky 
 
 Exact tool names (underscore, namespaced):
 
-| Tool | Purpose |
-| --- | --- |
-| `shapeport_inspect` | Detect format, schema, stats |
-| `shapeport_schema` | Infer/convert schema |
-| `shapeport_plan` | Build/explain plan |
-| `shapeport_transform` | Execute plan / plan+transform |
-| `shapeport_validate` | Validate data or plan |
-| `shapeport_query` | Bounded SQL over registered sources |
-| `shapeport_convert` | Representation conversion |
+| Tool                  | Purpose                             |
+| --------------------- | ----------------------------------- |
+| `shapeport_inspect`   | Detect format, schema, stats        |
+| `shapeport_schema`    | Infer/convert schema                |
+| `shapeport_plan`      | Build/explain plan                  |
+| `shapeport_transform` | Execute plan / plan+transform       |
+| `shapeport_validate`  | Validate data or plan               |
+| `shapeport_query`     | Bounded SQL over registered sources |
+| `shapeport_convert`   | Representation conversion           |
 
 Every tool MUST declare both `inputSchema` and `outputSchema`.
 
@@ -1361,7 +1368,10 @@ Schemas below are normative intent for `schemars`-generated contracts. Field nam
     },
     "statistics": { "type": "object" },
     "sample": true,
-    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } }
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Diagnostic" }
+    }
   }
 }
 ```
@@ -1389,10 +1399,7 @@ Schemas below are normative intent for `schemars`-generated contracts. Field nam
     },
     "sampleRows": { "type": "integer", "minimum": 0 }
   },
-  "anyOf": [
-    { "required": ["source"] },
-    { "required": ["schema"] }
-  ]
+  "anyOf": [{ "required": ["source"] }, { "required": ["schema"] }]
 }
 ```
 
@@ -1410,7 +1417,10 @@ Schemas below are normative intent for `schemars`-generated contracts. Field nam
     },
     "dialect": { "type": "string" },
     "evidence": { "type": "object" },
-    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } }
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Diagnostic" }
+    }
   }
 }
 ```
@@ -1428,7 +1438,11 @@ Schemas below are normative intent for `schemars`-generated contracts. Field nam
     "sourceSchema": { "type": "object" },
     "source": { "$ref": "#/$defs/SourceRef" },
     "targetSchema": { "type": "object" },
-    "mode": { "type": "string", "enum": ["strict", "smart"], "default": "smart" },
+    "mode": {
+      "type": "string",
+      "enum": ["strict", "smart"],
+      "default": "smart"
+    },
     "explain": { "type": "boolean", "default": false }
   },
   "anyOf": [
@@ -1452,7 +1466,10 @@ Schemas below are normative intent for `schemars`-generated contracts. Field nam
     "plan": { "type": "object" },
     "explanation": { "type": "array", "items": { "type": "object" } },
     "unresolved": { "type": "array", "items": { "type": "object" } },
-    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } }
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Diagnostic" }
+    }
   }
 }
 ```
@@ -1470,7 +1487,11 @@ Schemas below are normative intent for `schemars`-generated contracts. Field nam
     "source": { "$ref": "#/$defs/SourceRef" },
     "plan": { "type": "object" },
     "targetSchema": { "type": "object" },
-    "mode": { "type": "string", "enum": ["strict", "smart"], "default": "smart" },
+    "mode": {
+      "type": "string",
+      "enum": ["strict", "smart"],
+      "default": "smart"
+    },
     "outputFormat": {
       "type": "string",
       "enum": ["json", "jsonl", "yaml", "csv", "tsv", "parquet", "arrow-ipc"]
@@ -1499,7 +1520,10 @@ Schemas below are normative intent for `schemars`-generated contracts. Field nam
     "result": true,
     "artifact": { "$ref": "#/$defs/ArtifactRef" },
     "receipt": { "type": "object" },
-    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/Diagnostic" } }
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Diagnostic" }
+    }
   }
 }
 ```
@@ -1519,10 +1543,7 @@ When inline thresholds are exceeded, `result` MUST be omitted or null and `artif
     "schema": { "type": "object" },
     "plan": { "type": "object" }
   },
-  "anyOf": [
-    { "required": ["source", "schema"] },
-    { "required": ["plan"] }
-  ]
+  "anyOf": [{ "required": ["source", "schema"] }, { "required": ["plan"] }]
 }
 ```
 
@@ -1619,14 +1640,14 @@ mcp:
 
 ### 17.6 HTTP auth and bind (R8)
 
-| Rule | Requirement |
-| --- | --- |
-| Default bind | `127.0.0.1` (loopback) |
-| Loopback | MAY run without auth |
-| Non-loopback bind | REQUIRES `Authorization: Bearer <token>` where token comes from env `SHAPEPORT_MCP_TOKEN` or equivalent config |
-| Missing/invalid token on non-loopback | MUST deny (401) |
-| `Origin` header | When an allowlist is configured, a **present** `Origin` that does not match MUST be **403**. Requests **without** `Origin` (typical non-browser MCP clients) MUST still be accepted. Matching follows RFC 6454 `(scheme, host, port)` as implemented by `rmcp`. |
-| Protocol | Stateless Streamable HTTP only; no legacy HTTP+SSE |
+| Rule                                  | Requirement                                                                                                                                                                                                                                                     |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Default bind                          | `127.0.0.1` (loopback)                                                                                                                                                                                                                                          |
+| Loopback                              | MAY run without auth                                                                                                                                                                                                                                            |
+| Non-loopback bind                     | REQUIRES `Authorization: Bearer <token>` where token comes from env `SHAPEPORT_MCP_TOKEN` or equivalent config                                                                                                                                                  |
+| Missing/invalid token on non-loopback | MUST deny (401)                                                                                                                                                                                                                                                 |
+| `Origin` header                       | When an allowlist is configured, a **present** `Origin` that does not match MUST be **403**. Requests **without** `Origin` (typical non-browser MCP clients) MUST still be accepted. Matching follows RFC 6454 `(scheme, host, port)` as implemented by `rmcp`. |
+| Protocol                              | Stateless Streamable HTTP only; no legacy HTTP+SSE                                                                                                                                                                                                              |
 
 ### 17.7 stdio rules
 
@@ -1706,20 +1727,20 @@ CLI MAY accept plan YAML and MUST canonicalize to the JSON model internally. Mac
 
 ### 18.3 Exit codes
 
-| Code | Meaning |
-| --- | --- |
-| 0 | Success |
-| 2 | CLI usage/configuration error |
-| 3 | Input format/parse error |
-| 4 | Schema error |
-| 5 | Planning ambiguity |
-| 6 | Plan validation error |
-| 7 | Transformation error |
-| 8 | Target validation error |
-| 9 | Security/policy denial |
-| 10 | Resource limit exceeded |
-| 11 | I/O error |
-| 12 | Internal error |
+| Code | Meaning                       |
+| ---- | ----------------------------- |
+| 0    | Success                       |
+| 2    | CLI usage/configuration error |
+| 3    | Input format/parse error      |
+| 4    | Schema error                  |
+| 5    | Planning ambiguity            |
+| 6    | Plan validation error         |
+| 7    | Transformation error          |
+| 8    | Target validation error       |
+| 9    | Security/policy denial        |
+| 10   | Resource limit exceeded       |
+| 11   | I/O error                     |
+| 12   | Internal error                |
 
 These assignments are stable for v0.1+.
 
@@ -1993,43 +2014,43 @@ Bounded SQL `query`, MCP `rmcp` 3.x stdio + Streamable HTTP, artifacts, auth/ori
 
 ## 29. Recommended initial technical decisions
 
-| Decision | Selection |
-| --- | --- |
-| Language | Rust edition 2024 |
-| License | Apache-2.0 |
-| Execution backend | Document VM only |
-| Columnar libraries | Arrow/Parquet as codecs (optional convenience) |
-| Query engine | `sqlparser` + in-memory bounded evaluator |
-| DataFusion | Future optional `QueryBackend` only |
-| Canonical plan | JSON UTF-8 (`shapeport.dev/v1alpha1`) |
-| Path language | FieldPath (R1) |
-| Target schema priority | JSON Schema 2020-12 practical subset |
-| CLI | `clap` |
-| Async | Tokio where needed (MCP/HTTP) |
-| Telemetry | `tracing`; OTel exporter optional |
-| MCP SDK | `rmcp` 3.x |
-| MCP schemas | `schemars` JSON Schema 2020-12 |
-| Default inference | conservative |
-| Default mapping mode | smart |
-| Default error policy | fail |
-| Remote schema fetch | disabled |
-| Arbitrary code | prohibited |
+| Decision               | Selection                                      |
+| ---------------------- | ---------------------------------------------- |
+| Language               | Rust edition 2024                              |
+| License                | Apache-2.0                                     |
+| Execution backend      | Document VM only                               |
+| Columnar libraries     | Arrow/Parquet as codecs (optional convenience) |
+| Query engine           | `sqlparser` + in-memory bounded evaluator      |
+| DataFusion             | Future optional `QueryBackend` only            |
+| Canonical plan         | JSON UTF-8 (`shapeport.dev/v1alpha1`)          |
+| Path language          | FieldPath (R1)                                 |
+| Target schema priority | JSON Schema 2020-12 practical subset           |
+| CLI                    | `clap`                                         |
+| Async                  | Tokio where needed (MCP/HTTP)                  |
+| Telemetry              | `tracing`; OTel exporter optional              |
+| MCP SDK                | `rmcp` 3.x                                     |
+| MCP schemas            | `schemars` JSON Schema 2020-12                 |
+| Default inference      | conservative                                   |
+| Default mapping mode   | smart                                          |
+| Default error policy   | fail                                           |
+| Remote schema fetch    | disabled                                       |
+| Arbitrary code         | prohibited                                     |
 
 ---
 
 ## 30. Risks and mitigations
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| IR grows into a language | High | Fixed op budget; no join/agg in plan; no user code |
-| Auto-mapping mistakes | High | Ambiguity status; conservative defaults |
-| Document VM too slow on huge columnar data | Medium | Codec projection; future optional query/exec backends; honest limits |
-| MCP context blowups | High | Artifact threshold + content-addressed URIs |
-| Remote MCP exposes files | Critical | Roots, auth, Origin, loopback default |
-| Inference destroys identifiers | High | R13 conservative rules |
-| Plan semantics drift | High | Versioned IR + golden tests |
-| CSV nested silent loss | High | Nested policy `error` only |
-| Fake architectural certainty | Medium | Qualitative tradeoffs only (R16) |
+| Risk                                       | Impact   | Mitigation                                                           |
+| ------------------------------------------ | -------- | -------------------------------------------------------------------- |
+| IR grows into a language                   | High     | Fixed op budget; no join/agg in plan; no user code                   |
+| Auto-mapping mistakes                      | High     | Ambiguity status; conservative defaults                              |
+| Document VM too slow on huge columnar data | Medium   | Codec projection; future optional query/exec backends; honest limits |
+| MCP context blowups                        | High     | Artifact threshold + content-addressed URIs                          |
+| Remote MCP exposes files                   | Critical | Roots, auth, Origin, loopback default                                |
+| Inference destroys identifiers             | High     | R13 conservative rules                                               |
+| Plan semantics drift                       | High     | Versioned IR + golden tests                                          |
+| CSV nested silent loss                     | High     | Nested policy `error` only                                           |
+| Fake architectural certainty               | Medium   | Qualitative tradeoffs only (R16)                                     |
 
 ---
 
@@ -2088,16 +2109,16 @@ Concentrate original engineering on safe, explainable, reusable source-contract 
 
 ## Appendix B — Source references
 
-1. MCP specification 2026-07-28 — https://modelcontextprotocol.io/specification/2026-07-28/
-2. MCP 2026-07-28 release notes — https://blog.modelcontextprotocol.io/posts/2026-07-28/
-3. Streamable HTTP transport — https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
+1. MCP specification 2026-07-28 — <https://modelcontextprotocol.io/specification/2026-07-28/>
+2. MCP 2026-07-28 release notes — <https://blog.modelcontextprotocol.io/posts/2026-07-28/>
+3. Streamable HTTP transport — <https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http>
 4. SEP-2567 (stateless Streamable HTTP / sessions) — MCP SEPs registry
 5. SEP-2106 (JSON Schema 2020-12 tool schemas / outputSchema root types) — MCP SEPs registry
-6. SEP-2243 (`Mcp-Method` / `Mcp-Name`) — https://modelcontextprotocol.io/seps/2243-http-standardization
-7. Official Rust MCP SDK (`rmcp`) — https://github.com/modelcontextprotocol/rust-sdk
-8. JSON Schema 2020-12 — https://json-schema.org/draft/2020-12
-9. Apache Arrow Rust — https://arrow.apache.org/rust/arrow/
-10. Apache Parquet Rust — https://arrow.apache.org/rust/parquet/
-11. Microsoft Flint Chart — https://github.com/microsoft/flint-chart
+6. SEP-2243 (`Mcp-Method` / `Mcp-Name`) — <https://modelcontextprotocol.io/seps/2243-http-standardization>
+7. Official Rust MCP SDK (`rmcp`) — <https://github.com/modelcontextprotocol/rust-sdk>
+8. JSON Schema 2020-12 — <https://json-schema.org/draft/2020-12>
+9. Apache Arrow Rust — <https://arrow.apache.org/rust/arrow/>
+10. Apache Parquet Rust — <https://arrow.apache.org/rust/parquet/>
+11. Microsoft Flint Chart — <https://github.com/microsoft/flint-chart>
 
 Verify dependency versions at implementation time; this RFC pins intent to **`rmcp` 3.x** (3.1.2 current at acceptance) and MCP **2026-07-28** with **2025-11-25** client compatibility.

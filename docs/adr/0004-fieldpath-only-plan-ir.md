@@ -17,6 +17,7 @@ The ShapePort Transformation Plan IR needs a way to reference fields within stru
 ShapePort plans operate on record-shaped documents (rows) where each operation targets a specific named field or path. Recursive descent and wildcards are not needed for the current 11 operations (Project, Rename, Drop, Literal, Cast, Coalesce, Object, Map, Filter, Sort, Explode). Plan validation and schema assignability checks benefit from the guarantee that every `FieldPath` refers to exactly one field.
 
 Adding JSONPath or JMESPath would introduce:
+
 - An additional parsing dependency.
 - Non-deterministic references (wildcards, filters) that break plan fingerprinting.
 - Complexity in the type-checker that must resolve dynamic paths against a schema.
