@@ -9,8 +9,8 @@
 - [x] Implement planner, document executor, query engine
 - [x] Implement app services and shapeport CLI
 - [x] Implement MCP v2 stdio + Streamable HTTP server
-- [ ] Lint (`make lint`) — not run in this session
-- [ ] Test (`make test`) — not run in this session
+- [x] Lint (`cargo clippy --workspace --all-targets --all-features -- -D warnings`)
+- [x] Test (`cargo test --workspace --all-features`)
 - [x] Introduce PlanCmd/TransformCmd structs to fix too-many-arguments clippy
 - [x] Load --config YAML and apply mcp.allowedOrigins / bearerToken
 - [x] Apply SHAPEPORT_MCP_ORIGIN_ALLOWLIST env var
