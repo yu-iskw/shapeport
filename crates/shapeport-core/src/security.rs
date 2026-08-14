@@ -157,7 +157,7 @@ fn canonicalize_or_parent(path: &Path) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
-fn compute_digest(bytes: &[u8]) -> String {
+pub(crate) fn compute_digest(bytes: &[u8]) -> String {
     use sha2::Digest as _;
     let hash = sha2::Sha256::digest(bytes);
     hex::encode(hash)
@@ -202,7 +202,7 @@ fn is_expired(mtime: std::time::SystemTime, ttl_secs: u64) -> bool {
 
 fn mtime_plus_ttl(mtime: std::time::SystemTime, ttl_secs: u64) -> String {
     let dt: DateTime<Utc> = mtime.into();
-    let expiry = dt + chrono::Duration::seconds(ttl_secs as i64);
+    let expiry = dt + chrono::Duration::seconds(ttl_secs.cast_signed());
     expiry.to_rfc3339()
 }
 
@@ -225,7 +225,6 @@ mod tests {
 
     #[test]
     fn rejects_artifact_scheme_in_strip_file_uri() {
-        // shapeport-artifact:// must NOT pass through strip_file_uri
         assert!(strip_file_uri("shapeport-artifact://abc").is_err());
     }
 
@@ -233,7 +232,7 @@ mod tests {
     fn artifact_roundtrip() {
         let root = test_write_root();
         let mut config = RuntimeConfig::default();
-        config.filesystem.write_roots = vec![root.clone()];
+        config.filesystem.write_roots = vec![root];
         config.mcp.artifact_ttl_secs = 3600;
 
         let data = b"hello artifact";
@@ -251,7 +250,7 @@ mod tests {
     fn artifact_expired_with_zero_ttl() {
         let root = test_write_root();
         let mut config = RuntimeConfig::default();
-        config.filesystem.write_roots = vec![root.clone()];
+        config.filesystem.write_roots = vec![root];
         config.mcp.artifact_ttl_secs = 0;
 
         let data = b"will expire";

@@ -80,7 +80,7 @@ pub struct ExplainEntry {
 #[derive(Clone, Debug)]
 pub enum PlanOutcome {
     Ready {
-        plan: TransformationPlan,
+        plan: Box<TransformationPlan>,
         explanation: Vec<ExplainEntry>,
         diagnostics: Vec<Diagnostic>,
     },
@@ -184,7 +184,7 @@ pub fn plan_schemas(
         fingerprint: Some(schema_fingerprint(target)),
     });
     Ok(PlanOutcome::Ready {
-        plan,
+        plan: Box::new(plan),
         explanation,
         diagnostics: Vec::new(),
     })

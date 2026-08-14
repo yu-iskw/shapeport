@@ -244,7 +244,7 @@ fn apply_filesystem(file: &FileFilesystem, cfg: &mut RuntimeConfig) {
     }
 }
 
-fn apply_limits(file: &FileLimits, cfg: &mut RuntimeConfig) {
+const fn apply_limits(file: &FileLimits, cfg: &mut RuntimeConfig) {
     if let Some(v) = file.max_input_bytes {
         cfg.limits.max_input_bytes = v;
     }

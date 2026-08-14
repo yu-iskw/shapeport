@@ -9,7 +9,8 @@ use crate::engine::execute_plan;
 use crate::error::{Error, Result};
 use crate::fingerprint::schema_fingerprint;
 use crate::formats::{
-    Detection, FormatId, decode_records, detect_format, encode_records, infer_schema,
+    DecodeOptions, Detection, FormatId, decode_records_with, detect_format, encode_records,
+    infer_schema,
 };
 use crate::json_schema::{schema_from_json_schema, schema_to_json_schema, validate_value};
 use crate::plan::{ErrorPolicy, TransformationPlan, parse_plan_bytes};
@@ -30,7 +31,7 @@ pub struct RejectedRecord {
     pub diagnostic: Diagnostic,
 }
 
-/// Detailed output from plan execution.
+/// Detailed output from plan execution (fallback — full version lives in engine).
 #[derive(Clone, Debug)]
 pub struct ExecuteOutcome {
     /// Records that passed transformation.
@@ -67,7 +68,11 @@ pub struct InspectResult {
 pub fn inspect_source(request: &InspectRequest, config: &RuntimeConfig) -> Result<InspectResult> {
     let (bytes, path) = load_source(&request.source, config)?;
     let detection = detect_format(&bytes, path.as_deref(), request.source.format);
-    let records = decode_records(&bytes, detection.format, request.infer)?;
+    let opts = DecodeOptions {
+        infer: request.infer,
+        null_spellings: config.null_spellings.clone(),
+    };
+    let records = decode_records_with(&bytes, detection.format, &opts)?;
     check_row_limit(records.len(), config)?;
     let schema = infer_schema(&records, request.infer)?;
     let sample_rows = request.sample_rows.min(records.len());
@@ -128,7 +133,7 @@ pub fn plan_mapping(request: &PlanRequest, config: &RuntimeConfig) -> Result<Pla
             diagnostics,
         } => Ok(PlanResponse {
             status: "ready".into(),
-            plan: Some(plan),
+            plan: Some(*plan),
             explanation,
             unresolved: Vec::new(),
             diagnostics,
@@ -173,13 +178,17 @@ pub fn transform_data(
 ) -> Result<TransformResult> {
     let (bytes, path) = load_source(&request.source, config)?;
     let detection = detect_format(&bytes, path.as_deref(), request.source.format);
-    let records = decode_records(&bytes, detection.format, request.infer)?;
+    let opts = DecodeOptions {
+        infer: request.infer,
+        null_spellings: config.null_spellings.clone(),
+    };
+    let records = decode_records_with(&bytes, detection.format, &opts)?;
     check_row_limit(records.len(), config)?;
     check_nesting_depth(&records, config)?;
     let plan = resolve_plan(request, &records, config)?;
     let mut plan = plan;
     plan.execution.error_policy = request.error_policy;
-    // Use execute_plan as the fallback since execute_detailed is not yet in engine.
+    // execute_detailed not yet in engine; use execute_plan with empty rejects.
     let out = execute_plan(&plan, records)?;
     if let Some(schema) = &request.target_schema
         && plan.validation.output != "none"
@@ -269,7 +278,11 @@ pub fn validate_data(request: &ValidateRequest, config: &RuntimeConfig) -> Resul
         .ok_or_else(|| Error::usage("validate_schema", "validate requires a schema"))?;
     let (bytes, path) = load_source(source, config)?;
     let detection = detect_format(&bytes, path.as_deref(), source.format);
-    let records = decode_records(&bytes, detection.format, request.infer)?;
+    let opts = DecodeOptions {
+        infer: request.infer,
+        null_spellings: config.null_spellings.clone(),
+    };
+    let records = decode_records_with(&bytes, detection.format, &opts)?;
     let mut errors = Vec::new();
     for (idx, record) in records.iter().enumerate() {
         if let Err(err) = validate_value(schema, record) {
@@ -298,7 +311,11 @@ pub fn query_sources(request: &QueryRequest, config: &RuntimeConfig) -> Result<T
     for (name, source) in &request.sources {
         let (bytes, path) = load_source(source, config)?;
         let detection = detect_format(&bytes, path.as_deref(), source.format);
-        let records = decode_records(&bytes, detection.format, request.infer)?;
+        let opts = DecodeOptions {
+            infer: request.infer,
+            null_spellings: config.null_spellings.clone(),
+        };
+        let records = decode_records_with(&bytes, detection.format, &opts)?;
         check_row_limit(records.len(), config)?;
         tables.insert(name.clone(), records);
     }
@@ -328,7 +345,11 @@ pub struct ConvertRequest {
 pub fn convert_data(request: &ConvertRequest, config: &RuntimeConfig) -> Result<TransformResult> {
     let (bytes, path) = load_source(&request.source, config)?;
     let detection = detect_format(&bytes, path.as_deref(), request.source.format);
-    let records = decode_records(&bytes, detection.format, request.infer)?;
+    let opts = DecodeOptions {
+        infer: request.infer,
+        null_spellings: config.null_spellings.clone(),
+    };
+    let records = decode_records_with(&bytes, detection.format, &opts)?;
     check_row_limit(records.len(), config)?;
     let encoded = encode_records(&records, request.to)?;
     Ok(TransformResult {
@@ -426,7 +447,7 @@ fn check_nesting_depth(records: &[Value], config: &RuntimeConfig) -> Result<()> 
 }
 
 /// Compute the maximum nesting depth of a JSON-like value (1 for scalars).
-fn value_depth(value: &Value) -> u32 {
+pub(crate) fn value_depth(value: &Value) -> u32 {
     match value {
         Value::Object(map) => {
             let child_max = map.values().map(value_depth).max().unwrap_or(0);
@@ -492,7 +513,7 @@ mod tests {
         };
         let mut config = RuntimeConfig::default();
         config.filesystem.write_roots = vec![root.clone()];
-        config.filesystem.read_roots = vec![root.clone()];
+        config.filesystem.read_roots = vec![root];
         config.mcp.artifact_ttl_secs = 3600;
 
         let data = br#"[{"id":1}]"#;
@@ -524,5 +545,21 @@ mod tests {
             records: Vec::new(),
             rejects: vec![rr],
         };
+    }
+
+    #[test]
+    fn nesting_depth_limit_enforced() {
+        use super::check_nesting_depth;
+        let deeply_nested = Value::object([(
+            "a".into(),
+            Value::object([("b".into(), Value::object([("c".into(), Value::Int(1))]))]),
+        )]);
+        let mut config = RuntimeConfig::default();
+        config.limits.max_nesting_depth = 2;
+        let records = vec![deeply_nested];
+        assert!(check_nesting_depth(&records, &config).is_err());
+
+        config.limits.max_nesting_depth = 5;
+        assert!(check_nesting_depth(&records, &config).is_ok());
     }
 }
