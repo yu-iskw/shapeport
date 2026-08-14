@@ -119,7 +119,48 @@ The runner prints a JSON summary containing:
 - `falseAmbiguityRate`;
 - raw mapping and ambiguity counts.
 
-No arbitrary global percentage threshold is enforced yet. At this stage every declarative fixture is an exact behavioral assertion, while aggregate metrics establish a baseline. Once the corpus is sufficiently representative, CI can add monotonic regression gates, especially for `unsafeAutoMapRate`.
+The aggregate rates remain descriptive rather than arbitrary percentage gates. Stage 2 instead uses reviewed monotonic raw-count invariants so corpus growth does not make the safety policy depend on shifting denominators.
+
+## Reviewed regression baseline
+
+The full corpus is compared with `tests/conformance/mapping/baseline.json`. The baseline is intentionally small and human-reviewable:
+
+```json
+{
+  "corpusVersion": 1,
+  "cases": 20,
+  "correctMappings": 16,
+  "unsafeAutoMappings": 0,
+  "correctAmbiguities": 7,
+  "falseAmbiguities": 0,
+  "exactPlanSuccesses": 20
+}
+```
+
+A full-corpus run enforces these monotonic rules:
+
+- `cases` must not decrease;
+- `correctMappings` must not decrease;
+- `unsafeAutoMappings` must not increase;
+- `correctAmbiguities` must not decrease;
+- `falseAmbiguities` must not increase;
+- `exactPlanSuccesses` must not decrease;
+- the corpus version must match the reviewed baseline version.
+
+This is deliberately asymmetric. Improvements pass without changing the baseline. A safety regression fails even when aggregate percentages might still look acceptable. If a deliberate semantic change legitimately lowers one of the protected counts, the fixture expectations and `baseline.json` must be changed together so reviewers can see that the safety contract itself is changing.
+
+Family-filtered developer runs do not apply the aggregate baseline because their counts represent only a subset. Individual fixture assertions still apply exactly.
+
+## Rebaselining policy
+
+Do **not** update `baseline.json` merely to make CI green. Rebaseline only when the planner contract intentionally changes or when the corpus is deliberately restructured. The same pull request should explain:
+
+1. which protected metric changes;
+2. which fixture or planner behavior causes the change;
+3. why the new behavior is safer or otherwise intentional;
+4. why an unsafe automatic mapping is not being hidden by the baseline update.
+
+A baseline update is therefore a policy review point, not a generated snapshot refresh.
 
 ## Adding a case
 
@@ -136,6 +177,10 @@ For bugs, add the failing fixture first, then make the smallest planner change t
 
 ## CI policy
 
-`mapping_conformance` is an ordinary Rust integration test, so the existing workspace test workflow runs it automatically. This is **Stage 1** of the issue's CI strategy: malformed fixtures, planner crashes, and fixture expectation regressions fail CI, while the aggregate metrics are reported as a baseline.
+`mapping_conformance` is an ordinary Rust integration test, so the existing workspace test workflow runs it automatically.
 
-A future Stage 2 should persist/review the baseline and fail monotonic safety regressions, with unsafe automatic mappings weighted more severely than unresolved cases.
+**Stage 1** established the deterministic fixture corpus and machine-readable metric baseline.
+
+**Stage 2** is now active for full-corpus runs: fixture behavior remains an exact regression gate and the reviewed aggregate baseline additionally enforces monotonic safety invariants. CI also publishes the current JSON summary so changes can be compared during review without introducing percentage targets that have no statistical basis yet.
+
+Potential later stages can add richer per-mode baselines, target-schema/execution metrics for executable fixtures, and statistically meaningful thresholds once the corpus is large and representative enough to justify them.
