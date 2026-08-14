@@ -90,7 +90,12 @@ fn load_corpus() -> Corpus {
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
         let corpus: Corpus = serde_norway::from_str(&text)
             .unwrap_or_else(|error| panic!("failed to parse {}: {error}", path.display()));
-        assert_eq!(corpus.version, combined.version, "{}: version mismatch", path.display());
+        assert_eq!(
+            corpus.version,
+            combined.version,
+            "{}: version mismatch",
+            path.display()
+        );
         combined.cases.extend(corpus.cases);
     }
     combined
