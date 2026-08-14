@@ -1,0 +1,138 @@
+version: 1
+cases:
+  - name: decimal-preservation
+    family: decimals
+    mode: strict
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: amount
+            type:
+              kind: decimal
+              precision: 18
+              scale: 2
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: amount
+            type:
+              kind: decimal
+              precision: 18
+              scale: 2
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        amount: amount
+      reasonKinds:
+        amount: [exact-name match, exact type match]
+
+  - name: timestamp-preservation
+    family: timestamps
+    mode: strict
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: created_at
+            type:
+              kind: timestamp
+              unit: microsecond
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: created_at
+            type:
+              kind: timestamp
+              unit: microsecond
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        created_at: created_at
+
+  - name: default-bearing-optional-target-is-safe-to-omit
+    family: defaults
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: id
+            type: { kind: string }
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: id
+            type: { kind: string }
+            nullable: false
+          - name: currency
+            type: { kind: string }
+            nullable: true
+            metadata:
+              default: USD
+    expect:
+      status: ready
+      mappings:
+        id: id
+      omittedTargets: [currency]
+
+  - name: enum-domain-preservation
+    family: enums
+    mode: strict
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: status
+            type: { kind: string }
+            nullable: false
+            metadata:
+              enum: [active, inactive]
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: status
+            type: { kind: string }
+            nullable: false
+            metadata:
+              enum: [active, inactive]
+    expect:
+      status: ready
+      mappings:
+        status: status
+
+  - name: nested-record-cannot-be-silently-flattened
+    family: flatten
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer
+            type:
+              kind: record
+              fields:
+                - name: name
+                  type: { kind: string }
+                  nullable: false
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: customer_name
+            type: { kind: string }
+            nullable: false
+    expect:
+      status: ambiguous
+      ambiguousTargets: [customer_name]
+      unsafeAutoMapping: false
