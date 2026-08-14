@@ -76,9 +76,9 @@ They operate on different file sets and are not duplicates.
 
 The complexity workflow runs on pull requests, but most Debtmap metrics are informational.
 The fast authoritative gate for per-function complexity is Clippy's `cognitive_complexity` lint with threshold 10.
-Debtmap fails CI only for conservative gates: **function-level** cyclomatic complexity above 20 and the density/risk thresholds in `.debtmap.toml`.
+Debtmap fails CI only for conservative gates: **function-level** cyclomatic complexity above 20 and the density threshold in `.debtmap.toml`.
 File-scope GodObject aggregates are reported for maintainability insight and are not the cyclomatic hard gate.
-Coverage-aware scoring raises density because untested complexity is treated as higher debt; current validate density starts at 120 per 1K LOC. Risk is capped at 10 by Debtmap's config domain.
+Coverage-aware scoring raises density because untested complexity is treated as higher debt; the validate density gate is 120 per 1K LOC and CI must supply `coverage.lcov` so that penalty is actually applied. `max_codebase_risk_score` is informational here (Debtmap's config domain tops out at 10).
 
 **Entry point:** `make analyze-complexity`
 
@@ -168,7 +168,7 @@ Clippy is the fast, authoritative per-function gate. Violations block CI.
 | 16–20 | Strong refactoring signal                                            |
 | > 20  | CI failure (function-level; file-scope aggregates are informational) |
 
-Prefer function-level thresholds. Do not suppress a complexity violation without documenting why the complexity is inherent to the algorithm.
+Prefer function-level thresholds. Refactor functions that exceed cyclomatic 20; there is no justification-file suppress.
 
 ---
 

@@ -69,7 +69,6 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Generate coverage report
-        continue-on-error: true
         run: bash ./dev/coverage.sh
 
       - name: Install debtmap

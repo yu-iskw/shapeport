@@ -54,6 +54,10 @@ COVERAGE_ARGS=()
 if [[ -f ${COVERAGE_FILE} ]]; then
 	echo "==> Passing coverage data: --coverage-file ${COVERAGE_FILE}"
 	COVERAGE_ARGS+=(--coverage-file "${COVERAGE_FILE}")
+elif [[ -n ${GITHUB_ACTIONS-} ]]; then
+	echo "ERROR: coverage.lcov is required in CI because max_debt_density is sized for coverage-aware scoring."
+	echo "  The complexity workflow must generate LCOV before this step; do not skip coverage to make the density gate pass."
+	exit 1
 else
 	echo "    (no coverage.lcov found; run 'make coverage' first to enable coverage-aware analysis)"
 fi
