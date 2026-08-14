@@ -64,6 +64,18 @@ struct Summary {
     false_ambiguity_rate: f64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Baseline {
+    corpus_version: u32,
+    cases: usize,
+    correct_mappings: usize,
+    unsafe_auto_mappings: usize,
+    correct_ambiguities: usize,
+    false_ambiguities: usize,
+    exact_plan_successes: usize,
+}
+
 #[derive(Debug)]
 struct Observed {
     status: &'static str,
@@ -77,6 +89,10 @@ fn corpus_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("tests/conformance/mapping")
+}
+
+fn baseline_path() -> PathBuf {
+    corpus_dir().join("baseline.json")
 }
 
 fn load_corpus() -> Corpus {
@@ -99,6 +115,14 @@ fn load_corpus() -> Corpus {
         combined.cases.extend(corpus.cases);
     }
     combined
+}
+
+fn load_baseline() -> Baseline {
+    let path = baseline_path();
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+    serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("failed to parse {}: {error}", path.display()))
 }
 
 fn observe(case: &Case) -> Observed {
@@ -308,6 +332,53 @@ fn finish_metrics(summary: &mut Summary) {
     summary.false_ambiguity_rate = ratio(summary.false_ambiguities, summary.reported_ambiguities);
 }
 
+fn assert_regression_baseline(summary: &Summary, baseline: &Baseline) {
+    assert_eq!(
+        summary.corpus_version, baseline.corpus_version,
+        "conformance corpus version changed; update baseline.json in the same reviewed change"
+    );
+    assert_at_least("cases", summary.cases, baseline.cases);
+    assert_at_least(
+        "correctMappings",
+        summary.correct_mappings,
+        baseline.correct_mappings,
+    );
+    assert_at_most(
+        "unsafeAutoMappings",
+        summary.unsafe_auto_mappings,
+        baseline.unsafe_auto_mappings,
+    );
+    assert_at_least(
+        "correctAmbiguities",
+        summary.correct_ambiguities,
+        baseline.correct_ambiguities,
+    );
+    assert_at_most(
+        "falseAmbiguities",
+        summary.false_ambiguities,
+        baseline.false_ambiguities,
+    );
+    assert_at_least(
+        "exactPlanSuccesses",
+        summary.exact_plan_successes,
+        baseline.exact_plan_successes,
+    );
+}
+
+fn assert_at_least(metric: &str, actual: usize, baseline: usize) {
+    assert!(
+        actual >= baseline,
+        "conformance regression: {metric}={actual} is below reviewed baseline {baseline}; fix the regression or update tests/conformance/mapping/baseline.json in the same reviewed change"
+    );
+}
+
+fn assert_at_most(metric: &str, actual: usize, baseline: usize) {
+    assert!(
+        actual <= baseline,
+        "conformance safety regression: {metric}={actual} exceeds reviewed baseline {baseline}; fix the regression or update tests/conformance/mapping/baseline.json in the same reviewed change"
+    );
+}
+
 #[test]
 fn mapping_conformance_corpus() {
     let corpus = load_corpus();
@@ -331,6 +402,11 @@ fn mapping_conformance_corpus() {
 
     assert!(summary.cases > 0, "conformance filter selected no cases");
     finish_metrics(&mut summary);
+
+    if family_filter.is_none() {
+        let baseline = load_baseline();
+        assert_regression_baseline(&summary, &baseline);
+    }
 
     let json = serde_json::to_string_pretty(&summary).expect("serialize benchmark summary");
     println!("SHAPEPORT_CONFORMANCE_SUMMARY={json}");
