@@ -309,7 +309,11 @@ fn select_candidate(ranked: Vec<Candidate>, options: &PlannerOptions) -> Assign 
     Assign::Mapped(best.clone())
 }
 
-fn score_pair(source: &FieldRef<'_>, target: &FieldRef<'_>, mode: PlannerMode) -> Option<Candidate> {
+fn score_pair(
+    source: &FieldRef<'_>,
+    target: &FieldRef<'_>,
+    mode: PlannerMode,
+) -> Option<Candidate> {
     if !types_compatible(&source.field.ty, &target.field.ty) {
         return None;
     }
@@ -340,10 +344,7 @@ fn score_pair(source: &FieldRef<'_>, target: &FieldRef<'_>, mode: PlannerMode) -
         direct_name_evidence = true;
     }
 
-    if mode == PlannerMode::Smart
-        && !direct_name_evidence
-        && normalized_path_match(source, target)
-    {
+    if mode == PlannerMode::Smart && !direct_name_evidence && normalized_path_match(source, target) {
         score += 0.75;
         reasons.push("normalized-path match".into());
     }
