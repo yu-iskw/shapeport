@@ -38,7 +38,7 @@ fn type_to_json(ty: &Type) -> Json {
         Type::String => tagged("string", Map::new()),
         Type::Binary => tagged("binary", Map::new()),
         Type::Date => tagged("date", Map::new()),
-        Type::Time { unit } => unit_tag("time", unit),
+        Type::Time { unit } => unit_tag("time", *unit),
         Type::Timestamp { unit, timezone } => {
             let mut map = Map::new();
             map.insert(
@@ -50,7 +50,7 @@ fn type_to_json(ty: &Type) -> Json {
             }
             tagged("timestamp", map)
         }
-        Type::Duration { unit } => unit_tag("duration", unit),
+        Type::Duration { unit } => unit_tag("duration", *unit),
         Type::Record { fields } => {
             let mut map = Map::new();
             map.insert(
@@ -92,7 +92,7 @@ fn type_to_json(ty: &Type) -> Json {
     }
 }
 
-fn unit_tag(kind: &str, unit: &crate::schema::TimeUnit) -> Json {
+fn unit_tag(kind: &str, unit: crate::schema::TimeUnit) -> Json {
     let mut map = Map::new();
     map.insert(
         "unit".into(),

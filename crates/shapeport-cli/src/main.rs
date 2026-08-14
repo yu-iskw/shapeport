@@ -1,7 +1,7 @@
-//! ShapePort CLI.
+//! `ShapePort` CLI.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -157,6 +157,26 @@ struct TransformCmd {
     input_format: Option<String>,
 }
 
+/// Arguments for the `schema` sub-command, extracted to keep function arity ≤ 6.
+struct SchemaCmd {
+    input: Option<PathBuf>,
+    from_schema: Option<PathBuf>,
+    as_dialect: String,
+    output: Option<PathBuf>,
+    infer_types: String,
+    input_format: Option<String>,
+}
+
+/// Arguments for the `query` sub-command, extracted to keep function arity ≤ 6.
+struct QueryCmd {
+    sql: Option<String>,
+    sql_file: Option<PathBuf>,
+    sources: Vec<(String, String)>,
+    input: Option<PathBuf>,
+    output_format: String,
+    output: Option<PathBuf>,
+}
+
 fn parse_source_kv(raw: &str) -> Result<(String, String), String> {
     raw.split_once('=')
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -188,24 +208,24 @@ fn run() -> shapeport_core::Result<()> {
 }
 
 fn apply_env_vars(config: &mut RuntimeConfig) {
-    if let Ok(token) = std::env::var("SHAPEPORT_MCP_TOKEN") {
-        if !token.is_empty() {
-            config.mcp.bearer_token = Some(token);
-        }
+    if let Ok(token) = std::env::var("SHAPEPORT_MCP_TOKEN")
+        && !token.is_empty()
+    {
+        config.mcp.bearer_token = Some(token);
     }
-    if let Ok(origins) = std::env::var("SHAPEPORT_MCP_ORIGIN_ALLOWLIST") {
-        if !origins.is_empty() {
-            let list: Vec<String> = origins
-                .split(',')
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
-                .collect();
-            config.mcp.origin_allowlist = list;
-        }
+    if let Ok(origins) = std::env::var("SHAPEPORT_MCP_ORIGIN_ALLOWLIST")
+        && !origins.is_empty()
+    {
+        let list: Vec<String> = origins
+            .split(',')
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .collect();
+        config.mcp.origin_allowlist = list;
     }
 }
 
-fn apply_yaml_config(path: &PathBuf, config: &mut RuntimeConfig) -> shapeport_core::Result<()> {
+fn apply_yaml_config(path: &Path, config: &mut RuntimeConfig) -> shapeport_core::Result<()> {
     let mut loaded = RuntimeConfig::load_yaml(path)?;
     if loaded.filesystem.read_roots.is_empty() {
         loaded
@@ -223,6 +243,7 @@ fn apply_yaml_config(path: &PathBuf, config: &mut RuntimeConfig) -> shapeport_co
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn dispatch(command: Commands, config: RuntimeConfig) -> shapeport_core::Result<()> {
     match command {
         Commands::Inspect {
@@ -233,10 +254,10 @@ fn dispatch(command: Commands, config: RuntimeConfig) -> shapeport_core::Result<
             sample_rows,
         } => cmd_inspect(
             &config,
-            input,
-            output,
-            input_format,
-            infer_types,
+            &input,
+            &output,
+            input_format.as_deref(),
+            &infer_types,
             sample_rows,
         ),
         Commands::Schema {
@@ -248,12 +269,14 @@ fn dispatch(command: Commands, config: RuntimeConfig) -> shapeport_core::Result<
             input_format,
         } => cmd_schema(
             &config,
-            input,
-            from_schema,
-            as_dialect,
-            output,
-            infer_types,
-            input_format,
+            SchemaCmd {
+                input,
+                from_schema,
+                as_dialect,
+                output,
+                infer_types,
+                input_format,
+            },
         ),
         Commands::Plan {
             input,
@@ -287,7 +310,7 @@ fn dispatch(command: Commands, config: RuntimeConfig) -> shapeport_core::Result<
             input_format,
         } => cmd_transform(
             &config,
-            TransformCmd {
+            &TransformCmd {
                 input,
                 plan,
                 to_schema,
@@ -303,7 +326,13 @@ fn dispatch(command: Commands, config: RuntimeConfig) -> shapeport_core::Result<
             schema,
             plan,
             input_format,
-        } => cmd_validate(&config, input, schema, plan, input_format),
+        } => cmd_validate(
+            &config,
+            input,
+            schema.as_deref(),
+            plan.as_deref(),
+            input_format.as_deref(),
+        ),
         Commands::Query {
             sql,
             sql_file,
@@ -313,35 +342,43 @@ fn dispatch(command: Commands, config: RuntimeConfig) -> shapeport_core::Result<
             output,
         } => cmd_query(
             &config,
-            sql,
-            sql_file,
-            sources,
-            input,
-            output_format,
-            output,
+            QueryCmd {
+                sql,
+                sql_file,
+                sources,
+                input,
+                output_format,
+                output,
+            },
         ),
         Commands::Convert {
             input,
             to,
             output,
             input_format,
-        } => cmd_convert(&config, input, to, output, input_format),
+        } => cmd_convert(
+            &config,
+            &input,
+            &to,
+            output.as_deref(),
+            input_format.as_deref(),
+        ),
         Commands::Serve { transport, bind } => cmd_serve(config, transport, bind),
     }
 }
 
 fn cmd_inspect(
     config: &RuntimeConfig,
-    input: PathBuf,
-    output: String,
-    input_format: Option<String>,
-    infer_types: String,
+    input: &Path,
+    output: &str,
+    input_format: Option<&str>,
+    infer_types: &str,
     sample_rows: usize,
 ) -> shapeport_core::Result<()> {
     let result = inspect_source(
         &InspectRequest {
-            source: file_source(&input, input_format),
-            infer: parse_infer(&infer_types)?,
+            source: file_source(input, input_format),
+            infer: parse_infer(infer_types)?,
             sample_rows,
         },
         config,
@@ -360,36 +397,30 @@ fn cmd_inspect(
     print_json(&payload, output == "json")
 }
 
-fn cmd_schema(
-    config: &RuntimeConfig,
-    input: Option<PathBuf>,
-    from_schema: Option<PathBuf>,
-    as_dialect: String,
-    output: Option<PathBuf>,
-    infer_types: String,
-    input_format: Option<String>,
-) -> shapeport_core::Result<()> {
-    let schema = if let Some(path) = from_schema {
-        let bytes = std::fs::read(path)?;
+fn cmd_schema(config: &RuntimeConfig, cmd: SchemaCmd) -> shapeport_core::Result<()> {
+    let schema = if let Some(path) = cmd.from_schema {
+        let bytes = std::fs::read(&path)?;
         schema_from_json_value(&serde_json::from_slice(&bytes)?)?
     } else {
-        let input = input.ok_or_else(|| Error::usage("schema_input", "schema requires input"))?;
+        let input = cmd
+            .input
+            .ok_or_else(|| Error::usage("schema_input", "schema requires input"))?;
         inspect_source(
             &InspectRequest {
-                source: file_source(&input, input_format),
-                infer: parse_infer(&infer_types)?,
+                source: file_source(&input, cmd.input_format.as_deref()),
+                infer: parse_infer(&cmd.infer_types)?,
                 sample_rows: 10_000,
             },
             config,
         )?
         .schema
     };
-    let rendered = if as_dialect == "json-schema" {
+    let rendered = if cmd.as_dialect == "json-schema" {
         schema_as_json(&schema)
     } else {
         serde_json::to_value(&schema)?
     };
-    emit_json(output.as_deref(), &rendered, config)
+    emit_json(cmd.output.as_deref(), &rendered, config)
 }
 
 fn cmd_plan(config: &RuntimeConfig, cmd: PlanCmd) -> shapeport_core::Result<()> {
@@ -399,14 +430,16 @@ fn cmd_plan(config: &RuntimeConfig, cmd: PlanCmd) -> shapeport_core::Result<()> 
     let target = load_json_schema(&target_path)?;
     let source_schema = cmd
         .input_schema
-        .as_ref()
-        .map(|path| load_json_schema(path))
+        .as_deref()
+        .map(load_json_schema)
         .transpose()?;
+    let input_fmt = cmd.input_format.as_deref();
+    let source = cmd.input.map(|path| file_source(&path, input_fmt));
     let planned = plan_mapping(
         &PlanRequest {
             source_schema,
             target_schema: target,
-            source: cmd.input.map(|path| file_source(&path, cmd.input_format)),
+            source,
             mode: parse_mode(&cmd.mode)?,
             infer: InferMode::Conservative,
         },
@@ -435,13 +468,9 @@ fn emit_ambiguous_plan(planned: &shapeport_core::PlanResponse) -> shapeport_core
     Ok(())
 }
 
-fn cmd_transform(config: &RuntimeConfig, cmd: TransformCmd) -> shapeport_core::Result<()> {
-    let plan = cmd.plan.as_ref().map(|path| load_plan(path)).transpose()?;
-    let target_schema = cmd
-        .to_schema
-        .as_ref()
-        .map(|path| load_json_schema(path))
-        .transpose()?;
+fn cmd_transform(config: &RuntimeConfig, cmd: &TransformCmd) -> shapeport_core::Result<()> {
+    let plan = cmd.plan.as_deref().map(load_plan).transpose()?;
+    let target_schema = cmd.to_schema.as_deref().map(load_json_schema).transpose()?;
     let format = FormatId::parse(&cmd.output_format).ok_or_else(|| {
         Error::usage(
             "output_format",
@@ -450,7 +479,7 @@ fn cmd_transform(config: &RuntimeConfig, cmd: TransformCmd) -> shapeport_core::R
     })?;
     let result = transform_data(
         &TransformRequest {
-            source: file_source(&cmd.input, cmd.input_format),
+            source: file_source(&cmd.input, cmd.input_format.as_deref()),
             plan,
             target_schema,
             mode: parse_mode(&cmd.mode)?,
@@ -479,18 +508,15 @@ fn write_transform_output(
 fn cmd_validate(
     config: &RuntimeConfig,
     input: Option<PathBuf>,
-    schema: Option<PathBuf>,
-    plan: Option<PathBuf>,
-    input_format: Option<String>,
+    schema: Option<&Path>,
+    plan: Option<&Path>,
+    input_format: Option<&str>,
 ) -> shapeport_core::Result<()> {
     let result = validate_data(
         &ValidateRequest {
             source: input.map(|path| file_source(&path, input_format)),
-            schema: schema
-                .as_ref()
-                .map(|path| load_json_schema(path))
-                .transpose()?,
-            plan: plan.as_ref().map(|path| load_plan(path)).transpose()?,
+            schema: schema.map(load_json_schema).transpose()?,
+            plan: plan.map(load_plan).transpose()?,
             infer: InferMode::Conservative,
         },
         config,
@@ -509,25 +535,21 @@ fn cmd_validate(
     }
 }
 
-fn cmd_query(
-    config: &RuntimeConfig,
-    sql: Option<String>,
-    sql_file: Option<PathBuf>,
-    sources: Vec<(String, String)>,
-    input: Option<PathBuf>,
-    output_format: String,
-    output: Option<PathBuf>,
-) -> shapeport_core::Result<()> {
-    let sql = resolve_sql(sql, sql_file)?;
+fn cmd_query(config: &RuntimeConfig, cmd: QueryCmd) -> shapeport_core::Result<()> {
+    let sql = resolve_sql(cmd.sql, cmd.sql_file)?;
     let mut map = std::collections::HashMap::new();
-    for (name, path) in sources {
-        map.insert(name, file_source(&PathBuf::from(path), None));
+    for (name, path) in cmd.sources {
+        map.insert(name, file_source(Path::new(&path), None));
     }
-    if let Some(input) = input {
+    if let Some(input) = cmd.input {
         map.insert("input".into(), file_source(&input, None));
     }
-    let format = FormatId::parse(&output_format)
-        .ok_or_else(|| Error::usage("output_format", format!("unknown format {output_format}")))?;
+    let format = FormatId::parse(&cmd.output_format).ok_or_else(|| {
+        Error::usage(
+            "output_format",
+            format!("unknown format {}", cmd.output_format),
+        )
+    })?;
     let result = query_sources(
         &QueryRequest {
             sql,
@@ -537,7 +559,7 @@ fn cmd_query(
         },
         config,
     )?;
-    write_transform_output(output.as_deref(), &result.bytes, config)
+    write_transform_output(cmd.output.as_deref(), &result.bytes, config)
 }
 
 fn resolve_sql(sql: Option<String>, sql_file: Option<PathBuf>) -> shapeport_core::Result<String> {
@@ -551,22 +573,22 @@ fn resolve_sql(sql: Option<String>, sql_file: Option<PathBuf>) -> shapeport_core
 
 fn cmd_convert(
     config: &RuntimeConfig,
-    input: PathBuf,
-    to: String,
-    output: Option<PathBuf>,
-    input_format: Option<String>,
+    input: &Path,
+    to: &str,
+    output: Option<&Path>,
+    input_format: Option<&str>,
 ) -> shapeport_core::Result<()> {
     let to =
-        FormatId::parse(&to).ok_or_else(|| Error::usage("to", format!("unknown format {to}")))?;
+        FormatId::parse(to).ok_or_else(|| Error::usage("to", format!("unknown format {to}")))?;
     let result = convert_data(
         &ConvertRequest {
-            source: file_source(&input, input_format),
+            source: file_source(input, input_format),
             to,
             infer: InferMode::Conservative,
         },
         config,
     )?;
-    write_transform_output(output.as_deref(), &result.bytes, config)
+    write_transform_output(output, &result.bytes, config)
 }
 
 fn cmd_serve(
@@ -586,19 +608,19 @@ async fn run_serve(
     match transport {
         Transport::Stdio => shapeport_mcp::serve_stdio(config)
             .await
-            .map_err(|err| Error::internal(err)),
+            .map_err(Error::internal),
         Transport::StreamableHttp => {
             let addr: SocketAddr = bind
                 .parse()
                 .map_err(|err: std::net::AddrParseError| Error::usage("bind", err.to_string()))?;
             shapeport_mcp::serve_http(addr, config)
                 .await
-                .map_err(|err| Error::internal(err))
+                .map_err(Error::internal)
         }
     }
 }
 
-fn file_source(path: &PathBuf, format: Option<String>) -> SourceSpec {
+fn file_source(path: &Path, format: Option<&str>) -> SourceSpec {
     let uri = if path.as_os_str() == "-" {
         "-".into()
     } else {
@@ -606,13 +628,13 @@ fn file_source(path: &PathBuf, format: Option<String>) -> SourceSpec {
     };
     SourceSpec {
         uri: Some(uri),
-        format: format.as_deref().and_then(FormatId::parse),
+        format: format.and_then(FormatId::parse),
         inline: None,
         bytes: None,
     }
 }
 
-fn load_json_schema(path: &PathBuf) -> shapeport_core::Result<shapeport_core::Schema> {
+fn load_json_schema(path: &Path) -> shapeport_core::Result<shapeport_core::Schema> {
     let bytes = std::fs::read(path)?;
     let value: serde_json::Value = if is_yaml_ext(path) {
         serde_yml::from_slice(&bytes).map_err(|err| Error::parse("yaml_schema", err.to_string()))?
@@ -622,12 +644,12 @@ fn load_json_schema(path: &PathBuf) -> shapeport_core::Result<shapeport_core::Sc
     schema_from_json_value(&value)
 }
 
-fn load_plan(path: &PathBuf) -> shapeport_core::Result<shapeport_core::TransformationPlan> {
+fn load_plan(path: &Path) -> shapeport_core::Result<shapeport_core::TransformationPlan> {
     let bytes = std::fs::read(path)?;
     parse_plan_bytes(&bytes, is_yaml_ext(path))
 }
 
-fn is_yaml_ext(path: &PathBuf) -> bool {
+fn is_yaml_ext(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext == "yaml" || ext == "yml")

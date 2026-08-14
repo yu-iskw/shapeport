@@ -45,7 +45,7 @@ impl Field {
     }
 }
 
-/// ShapePort type AST. Field order in records is significant.
+/// `ShapePort` type AST. Field order in records is significant.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Type {
@@ -250,8 +250,7 @@ pub fn types_compatible(source: &Type, target: &Type) -> bool {
             Type::Int { .. },
             Type::Float { .. } | Type::Decimal { .. } | Type::String
         ) | (Type::Decimal { .. }, Type::String | Type::Float { .. })
-            | (Type::Float { .. }, Type::String)
-            | (Type::Bool, Type::String)
+            | (Type::Float { .. } | Type::Bool, Type::String)
     )
 }
 

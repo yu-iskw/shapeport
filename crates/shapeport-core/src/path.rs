@@ -1,4 +1,4 @@
-//! ShapePort FieldPath grammar (RFC 0001 §8).
+//! `ShapePort` `FieldPath` grammar (RFC 0001 §8).
 
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
@@ -21,7 +21,7 @@ pub struct FieldPath {
 }
 
 impl FieldPath {
-    /// Parse a FieldPath. JSONPath (`$`, `..`, filters) is rejected.
+    /// Parse a `FieldPath`. `JSONPath` (`$`, `..`, filters) is rejected.
     pub fn parse(input: &str) -> Result<Self> {
         reject_jsonpath(input)?;
         let segments = parse_segments(input)?;

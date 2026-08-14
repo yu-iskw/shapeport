@@ -1,7 +1,7 @@
-//! RFC acceptance tests exercising public shapeport_core APIs end-to-end.
+//! RFC acceptance tests exercising public `shapeport_core` APIs end-to-end.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use shapeport_core::config::{InferMode, RuntimeConfig};
 use shapeport_core::formats::FormatId;
@@ -21,7 +21,7 @@ fn permissive_config() -> RuntimeConfig {
     RuntimeConfig::default()
 }
 
-fn file_source(path: PathBuf, format: Option<FormatId>) -> SourceSpec {
+fn file_source(path: &Path, format: Option<FormatId>) -> SourceSpec {
     SourceSpec {
         uri: Some(path.to_string_lossy().into_owned()),
         inline: None,
@@ -48,7 +48,7 @@ fn flint_inspect() {
     let config = permissive_config();
     let input = fixtures_dir().join("flint/input.json");
     let req = InspectRequest {
-        source: file_source(input, Some(FormatId::Json)),
+        source: file_source(&input, Some(FormatId::Json)),
         infer: InferMode::Conservative,
         sample_rows: 10,
     };
@@ -132,7 +132,7 @@ fn csv_leading_zeros_conservative() {
     let config = permissive_config();
     let csv_path = fixtures_dir().join("csv/people.csv");
     let req = InspectRequest {
-        source: file_source(csv_path.clone(), Some(FormatId::Csv)),
+        source: file_source(&csv_path, Some(FormatId::Csv)),
         infer: InferMode::Conservative,
         sample_rows: 10,
     };
@@ -162,7 +162,7 @@ fn csv_to_json_convert() {
     let csv_path = fixtures_dir().join("csv/people.csv");
     let result = convert_data(
         &ConvertRequest {
-            source: file_source(csv_path, Some(FormatId::Csv)),
+            source: file_source(&csv_path, Some(FormatId::Csv)),
             to: FormatId::Json,
             infer: InferMode::Conservative,
         },
@@ -265,7 +265,7 @@ fn identity_json_roundtrip() {
     let original_bytes = serde_json::to_vec(&original).unwrap();
 
     // JSON → JSONL
-    let jsonl_result = convert_data(
+    let jsonl_out = convert_data(
         &ConvertRequest {
             source: bytes_source(original_bytes, FormatId::Json),
             to: FormatId::Jsonl,
@@ -276,9 +276,9 @@ fn identity_json_roundtrip() {
     .expect("JSON→JSONL convert failed");
 
     // JSONL → JSON
-    let json_result = convert_data(
+    let final_out = convert_data(
         &ConvertRequest {
-            source: bytes_source(jsonl_result.bytes, FormatId::Jsonl),
+            source: bytes_source(jsonl_out.bytes, FormatId::Jsonl),
             to: FormatId::Json,
             infer: InferMode::Conservative,
         },
@@ -287,7 +287,7 @@ fn identity_json_roundtrip() {
     .expect("JSONL→JSON convert failed");
 
     let roundtripped: serde_json::Value =
-        serde_json::from_slice(&json_result.bytes).expect("roundtripped not valid JSON");
+        serde_json::from_slice(&final_out.bytes).expect("roundtripped not valid JSON");
     assert_eq!(roundtripped, original);
 }
 

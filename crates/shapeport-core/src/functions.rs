@@ -8,7 +8,7 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value> {
         "lower" => unary_string(name, args, str::to_lowercase),
         "upper" => unary_string(name, args, str::to_uppercase),
         "trim" => unary_string(name, args, |s| s.trim().to_string()),
-        "concat" => concat_args(args),
+        "concat" => Ok(concat_args(args)),
         "replace" => replace_args(args),
         "substring" => substring_args(args),
         "regex_extract" => regex_extract(args),
@@ -49,7 +49,7 @@ fn one_string(name: &str, args: &[Value]) -> Result<String> {
     }
 }
 
-fn concat_args(args: &[Value]) -> Result<Value> {
+fn concat_args(args: &[Value]) -> Value {
     let mut out = String::new();
     for arg in args {
         match arg {
@@ -58,7 +58,7 @@ fn concat_args(args: &[Value]) -> Result<Value> {
             other => out.push_str(&value_as_text(other)),
         }
     }
-    Ok(Value::String(out))
+    Value::String(out)
 }
 
 fn replace_args(args: &[Value]) -> Result<Value> {
@@ -96,14 +96,11 @@ fn substring_args(args: &[Value]) -> Result<Value> {
 }
 
 fn regex_extract(args: &[Value]) -> Result<Value> {
-    let (src, pattern) = match args {
-        [Value::String(src), Value::String(pattern)] => (src, pattern),
-        _ => {
-            return Err(Error::transform(
-                "bad_args",
-                "regex_extract expects (string, pattern)",
-            ));
-        }
+    let [Value::String(src), Value::String(pattern)] = args else {
+        return Err(Error::transform(
+            "bad_args",
+            "regex_extract expects (string, pattern)",
+        ));
     };
     if pattern.len() > 256 {
         return Err(Error::limit(
@@ -184,11 +181,10 @@ fn coalesce(args: &[Value]) -> Value {
 
 fn temporal(name: &str, args: &[Value]) -> Result<Value> {
     match (name, args) {
-        ("parse_timestamp" | "parse_date", [Value::String(text)]) => {
+        ("parse_timestamp" | "parse_date", [Value::String(text)])
+        | ("format_timestamp" | "date_trunc", [Value::String(text), ..]) => {
             Ok(Value::String(text.clone()))
         }
-        ("format_timestamp", [Value::String(text), ..]) => Ok(Value::String(text.clone())),
-        ("date_trunc", [Value::String(text), ..]) => Ok(Value::String(text.clone())),
         _ => Err(Error::transform(
             "bad_args",
             format!("{name} expects a timestamp string"),

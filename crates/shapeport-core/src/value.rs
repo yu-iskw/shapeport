@@ -31,9 +31,10 @@ impl Display for DecimalValue {
     }
 }
 
-/// ShapePort document value. Object insertion order is significant.
-#[derive(Clone, Debug, PartialEq)]
+/// `ShapePort` document value. Object insertion order is significant.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum Value {
+    #[default]
     Null,
     Bool(bool),
     Int(i64),
@@ -100,17 +101,8 @@ impl Value {
 
     /// Truthiness for filter predicates: null/false are false; all else true.
     #[must_use]
-    pub const fn is_truthy(&self) -> bool {
-        match self {
-            Self::Null | Self::Bool(false) => false,
-            _ => true,
-        }
-    }
-}
-
-impl Default for Value {
-    fn default() -> Self {
-        Self::Null
+    pub fn is_truthy(&self) -> bool {
+        !matches!(self, Self::Null | Self::Bool(false))
     }
 }
 

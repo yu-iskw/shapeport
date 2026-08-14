@@ -127,15 +127,10 @@ fn apply_join(
     let JoinConstraint::On(expr) = constraint else {
         return Err(Error::usage("sql_join", "JOIN must use ON equality"));
     };
-    equi_join(left_rows, &right, expr, is_left)
+    Ok(equi_join(left_rows, &right, expr, is_left))
 }
 
-fn equi_join(
-    left_rows: &[Value],
-    right_rows: &[Value],
-    on: &SqlExpr,
-    is_left: bool,
-) -> Result<Vec<Value>> {
+fn equi_join(left_rows: &[Value], right_rows: &[Value], on: &SqlExpr, is_left: bool) -> Vec<Value> {
     let mut out = Vec::new();
     for left in left_rows {
         let mut matched = false;
@@ -150,7 +145,7 @@ fn equi_join(
             out.push(left.clone());
         }
     }
-    Ok(out)
+    out
 }
 
 fn merge_objects(left: &Value, right: &Value) -> Value {
@@ -177,7 +172,7 @@ fn project_or_group(select: &Select, rows: Vec<Value>) -> Result<Vec<Value>> {
 fn is_grouped(select: &Select) -> bool {
     match &select.group_by {
         GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
-        _ => select.projection.iter().any(is_agg_item),
+        GroupByExpr::All(_) => select.projection.iter().any(is_agg_item),
     }
 }
 
@@ -210,7 +205,7 @@ fn group_by(select: &Select, rows: Vec<Value>) -> Result<Vec<Value>> {
 fn group_key_exprs(select: &Select) -> Vec<SqlExpr> {
     match &select.group_by {
         GroupByExpr::Expressions(exprs, _) => exprs.clone(),
-        _ => Vec::new(),
+        GroupByExpr::All(_) => Vec::new(),
     }
 }
 
@@ -243,7 +238,7 @@ fn project_row(select: &Select, row: &Value) -> Result<Value> {
                     }
                 }
             }
-            _ => {
+            SelectItem::QualifiedWildcard(_, _) => {
                 return Err(Error::usage("sql_select", "unsupported select item"));
             }
         }
@@ -261,7 +256,7 @@ fn project_group(select: &Select, first: &Value, members: &[Value]) -> Result<Va
             SelectItem::ExprWithAlias { expr, alias } => {
                 map.insert(alias.value.clone(), eval_group_expr(expr, first, members)?);
             }
-            _ => {
+            SelectItem::QualifiedWildcard(_, _) | SelectItem::Wildcard(_) => {
                 return Err(Error::usage(
                     "sql_select",
                     "unsupported grouped select item",
@@ -284,7 +279,7 @@ fn eval_agg(expr: &SqlExpr, members: &[Value]) -> Result<Value> {
         return Err(Error::internal("expected aggregate function"));
     };
     let name = func.name.to_string().to_ascii_lowercase();
-    let arg = first_arg(func)?;
+    let arg = first_arg(func);
     match name.as_str() {
         "count" => Ok(Value::Int(i64::try_from(members.len()).unwrap_or(i64::MAX))),
         "sum" => Ok(Value::Float(fold_nums(members, arg, 0.0, |a, b| a + b)?)),
@@ -311,15 +306,13 @@ fn eval_agg(expr: &SqlExpr, members: &[Value]) -> Result<Value> {
     }
 }
 
-fn first_arg(func: &sqlparser::ast::Function) -> Result<Option<&SqlExpr>> {
+fn first_arg(func: &sqlparser::ast::Function) -> Option<&SqlExpr> {
     let FunctionArguments::List(list) = &func.args else {
-        return Ok(None);
+        return None;
     };
     match list.args.first() {
-        Some(FunctionArg::Unnamed(FunctionArgExpr::Wildcard))
-        | Some(FunctionArg::Unnamed(FunctionArgExpr::QualifiedWildcard(_))) => Ok(None),
-        Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) => Ok(Some(expr)),
-        _ => Ok(None),
+        Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) => Some(expr),
+        _ => None,
     }
 }
 

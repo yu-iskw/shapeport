@@ -3,7 +3,7 @@
 use std::fmt::{Display, Formatter};
 use std::io;
 
-/// Stable ShapePort error categories. Numeric values match CLI exit codes.
+/// Stable `ShapePort` error categories. Numeric values match CLI exit codes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ErrorKind {
     Usage = 2,
@@ -45,7 +45,7 @@ impl Display for ErrorKind {
     }
 }
 
-/// ShapePort error with kind, machine code, and human message.
+/// `ShapePort` error with kind, machine code, and human message.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("{kind}: {code}: {message}")]
 pub struct Error {
@@ -138,7 +138,7 @@ impl From<csv::Error> for Error {
     }
 }
 
-/// Result alias for ShapePort operations.
+/// Result alias for `ShapePort` operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]

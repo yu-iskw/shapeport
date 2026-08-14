@@ -10,6 +10,7 @@ pub fn schema_from_json_schema(doc: &Json) -> Result<Schema> {
     Ok(Schema::new(type_from_schema(doc, doc)?))
 }
 
+#[must_use]
 pub fn schema_to_json_schema(schema: &Schema) -> Json {
     type_to_json_schema(&schema.root)
 }
@@ -213,11 +214,11 @@ fn validate_type(ty: &Type, value: &Value, path: &str) -> Result<()> {
         return Ok(());
     }
     match (ty, value) {
-        (Type::Any | Type::Unknown, _) => Ok(()),
-        (Type::Bool, Value::Bool(_)) => Ok(()),
-        (Type::Int { .. }, Value::Int(_) | Value::UInt(_)) => Ok(()),
-        (Type::Float { .. }, Value::Float(_) | Value::Int(_) | Value::UInt(_)) => Ok(()),
-        (Type::String | Type::Decimal { .. }, Value::String(_) | Value::Decimal(_)) => Ok(()),
+        (Type::Any | Type::Unknown, _)
+        | (Type::Bool, Value::Bool(_))
+        | (Type::Int { .. }, Value::Int(_) | Value::UInt(_))
+        | (Type::Float { .. }, Value::Float(_) | Value::Int(_) | Value::UInt(_))
+        | (Type::String | Type::Decimal { .. }, Value::String(_) | Value::Decimal(_)) => Ok(()),
         (Type::Record { fields }, Value::Object(map)) => validate_object(fields, map, path),
         (Type::List { element, .. }, Value::Array(items)) => validate_list(element, items, path),
         (Type::Union { variants }, _) => validate_union(variants, value, path),
