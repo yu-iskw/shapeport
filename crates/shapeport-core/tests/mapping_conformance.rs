@@ -73,18 +73,27 @@ struct Observed {
     reasons: BTreeMap<String, BTreeSet<String>>,
 }
 
-fn corpus_path() -> PathBuf {
+fn corpus_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("tests/conformance/mapping/cases.yaml")
+        .join("tests/conformance/mapping")
 }
 
 fn load_corpus() -> Corpus {
-    let path = corpus_path();
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-    serde_norway::from_str(&text)
-        .unwrap_or_else(|error| panic!("failed to parse {}: {error}", path.display()))
+    let mut combined = Corpus {
+        version: 1,
+        cases: Vec::new(),
+    };
+    for filename in ["cases.yaml", "extended.yaml"] {
+        let path = corpus_dir().join(filename);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        let corpus: Corpus = serde_norway::from_str(&text)
+            .unwrap_or_else(|error| panic!("failed to parse {}: {error}", path.display()));
+        assert_eq!(corpus.version, combined.version, "{}: version mismatch", path.display());
+        combined.cases.extend(corpus.cases);
+    }
+    combined
 }
 
 fn observe(case: &Case) -> Observed {
