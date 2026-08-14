@@ -1658,18 +1658,15 @@ name = "shapeport-mcp"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chrono",
  "hex",
- "http",
  "rmcp",
  "schemars",
  "serde",
  "serde_json",
  "sha2",
  "shapeport-core",
- "thiserror",
  "tokio",
- "tower",
- "tracing",
 ]
 
 [[package]]

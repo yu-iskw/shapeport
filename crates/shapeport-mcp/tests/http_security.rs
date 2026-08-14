@@ -27,7 +27,7 @@ fn config_with_origins(origins: Vec<String>) -> RuntimeConfig {
 #[tokio::test]
 async fn non_loopback_without_token_returns_err() {
     // Use a non-loopback address (we don't actually bind – the check happens before bind).
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0);
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
     let config = RuntimeConfig::default(); // no token set
 
     let err = shapeport_mcp::serve_http(addr, config)

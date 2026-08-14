@@ -1,20 +1,20 @@
 //! MCP 2026-07-28 server built on `rmcp` 3.x.
 
+use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::DefaultBodyLimit;
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::Response;
+use chrono::Utc;
 use rmcp::handler::server::wrapper::{Json, Parameters};
+use rmcp::model::{Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::transport::stdio;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
-use rmcp::{
-    ErrorData as McpError, ServerHandler, ServiceExt, schemars, tool, tool_handler, tool_router,
-};
+use rmcp::{ServerHandler, ServiceExt, schemars, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
@@ -24,7 +24,8 @@ use shapeport_core::plan::{ErrorPolicy, TransformationPlan, parse_plan_json};
 use shapeport_core::{
     ConvertRequest, InspectRequest, PlanRequest, PlannerMode, QueryRequest, SourceSpec,
     TransformRequest, ValidateRequest, Value, convert_data, inspect_source, plan_mapping,
-    query_sources, schema_as_json, schema_from_json_value, transform_data, validate_data,
+    query_sources, schema_as_json, schema_fingerprint, schema_from_json_value, transform_data,
+    validate_data,
 };
 use tokio::net::TcpListener;
 
@@ -40,16 +41,18 @@ pub struct ShapePortMcp {
 
 impl ShapePortMcp {
     #[must_use]
-    pub fn new(config: RuntimeConfig) -> Self {
+    pub const fn new(config: RuntimeConfig) -> Self {
         Self {
             state: AppState { config },
         }
     }
 }
 
+/// Reference to a data source: either a URI or inline JSON.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceRef {
+    /// `file://` URI or `shapeport-artifact://` URI. One of `uri` or `inline` is required.
     #[serde(default)]
     pub uri: Option<String>,
     #[serde(default)]
@@ -175,6 +178,9 @@ pub struct DataOut {
     pub result: Option<JsonValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact: Option<ArtifactOut>,
+    /// Summary of the operation: rows, bytes, format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<JsonValue>,
     pub diagnostics: Vec<JsonValue>,
 }
 
@@ -186,6 +192,23 @@ pub struct ArtifactOut {
     pub bytes: u64,
     pub rows: u64,
     pub sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    /// Filesystem path; only set when `config.mcp.local_filesystem` is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolErrorOut {
+    pub status: String,
+    pub kind: String,
+    pub code: String,
+    pub message: String,
+    pub diagnostics: Vec<JsonValue>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -235,17 +258,17 @@ impl ShapePortMcp {
     fn inspect(
         &self,
         Parameters(args): Parameters<InspectArgs>,
-    ) -> Result<Json<InspectOut>, McpError> {
+    ) -> Result<Json<InspectOut>, Json<ToolErrorOut>> {
         let infer = parse_infer(args.options.infer_types.as_deref());
         let result = inspect_source(
             &InspectRequest {
-                source: to_source(&args.source)?,
+                source: to_source(&args.source).map_err(tool_fail)?,
                 infer,
                 sample_rows: args.options.sample_rows.unwrap_or(20) as usize,
             },
             &self.state.config,
         )
-        .map_err(tool_err)?;
+        .map_err(tool_fail)?;
         Ok(Json(InspectOut {
             format: FormatOut {
                 name: result.detection.format.as_str().into(),
@@ -266,53 +289,64 @@ impl ShapePortMcp {
     fn schema_tool(
         &self,
         Parameters(args): Parameters<SchemaArgs>,
-    ) -> Result<Json<SchemaOut>, McpError> {
+    ) -> Result<Json<SchemaOut>, Json<ToolErrorOut>> {
         let dialect = args
             .as_field
             .or(args.as_dialect)
             .unwrap_or_else(|| "shapeport".into());
         if let Some(schema) = args.schema {
-            let parsed = schema_from_json_value(&schema).map_err(tool_err)?;
-            return Ok(Json(emit_schema(parsed, &dialect)));
+            let parsed = schema_from_json_value(&schema).map_err(tool_fail)?;
+            return Ok(Json(emit_schema(&parsed, &dialect)));
         }
-        let source = args
-            .source
-            .ok_or_else(|| McpError::invalid_params("source or schema is required", None))?;
+        let source = args.source.ok_or_else(|| {
+            tool_fail(shapeport_core::Error::usage(
+                "missing_source",
+                "source or schema is required",
+            ))
+        })?;
         let inspected = inspect_source(
             &InspectRequest {
-                source: to_source(&source)?,
+                source: to_source(&source).map_err(tool_fail)?,
                 infer: parse_infer(args.infer_types.as_deref()),
                 sample_rows: args.sample_rows.unwrap_or(100) as usize,
             },
             &self.state.config,
         )
-        .map_err(tool_err)?;
-        Ok(Json(emit_schema(inspected.schema, &dialect)))
+        .map_err(tool_fail)?;
+        Ok(Json(emit_schema(&inspected.schema, &dialect)))
     }
 
     #[tool(
         name = "shapeport_plan",
         description = "Build a deterministic Transformation Plan"
     )]
-    fn plan(&self, Parameters(args): Parameters<PlanArgs>) -> Result<Json<PlanOut>, McpError> {
-        let target = schema_from_json_value(&args.target_schema).map_err(tool_err)?;
+    fn plan(
+        &self,
+        Parameters(args): Parameters<PlanArgs>,
+    ) -> Result<Json<PlanOut>, Json<ToolErrorOut>> {
+        let target = schema_from_json_value(&args.target_schema).map_err(tool_fail)?;
         let source_schema = args
             .source_schema
             .as_ref()
             .map(schema_from_json_value)
             .transpose()
-            .map_err(tool_err)?;
+            .map_err(tool_fail)?;
         let planned = plan_mapping(
             &PlanRequest {
                 source_schema,
                 target_schema: target,
-                source: args.source.as_ref().map(to_source).transpose()?,
+                source: args
+                    .source
+                    .as_ref()
+                    .map(to_source)
+                    .transpose()
+                    .map_err(tool_fail)?,
                 mode: parse_mode(args.mode.as_deref()),
                 infer: InferMode::Conservative,
             },
             &self.state.config,
         )
-        .map_err(tool_err)?;
+        .map_err(tool_fail)?;
         Ok(Json(PlanOut {
             status: planned.status,
             plan: planned
@@ -331,26 +365,32 @@ impl ShapePortMcp {
     fn transform(
         &self,
         Parameters(args): Parameters<TransformArgs>,
-    ) -> Result<Json<DataOut>, McpError> {
+    ) -> Result<Json<DataOut>, Json<ToolErrorOut>> {
+        let fmt = parse_format(args.output_format.as_deref(), FormatId::Json);
         let result = transform_data(
             &TransformRequest {
-                source: to_source(&args.source)?,
-                plan: args.plan.as_ref().map(parse_plan_value).transpose()?,
+                source: to_source(&args.source).map_err(tool_fail)?,
+                plan: args
+                    .plan
+                    .as_ref()
+                    .map(parse_plan_value)
+                    .transpose()
+                    .map_err(tool_fail)?,
                 target_schema: args
                     .target_schema
                     .as_ref()
                     .map(schema_from_json_value)
                     .transpose()
-                    .map_err(tool_err)?,
+                    .map_err(tool_fail)?,
                 mode: parse_mode(args.mode.as_deref()),
-                output_format: parse_format(args.output_format.as_deref(), FormatId::Json),
+                output_format: fmt,
                 error_policy: parse_policy(args.error_policy.as_deref()),
                 infer: InferMode::Conservative,
             },
             &self.state.config,
         )
-        .map_err(tool_err)?;
-        pack_data(result, FormatId::Json, &self.state.config)
+        .map_err(tool_fail)?;
+        pack_data(&result, fmt, &self.state.config)
     }
 
     #[tool(
@@ -360,22 +400,32 @@ impl ShapePortMcp {
     fn validate(
         &self,
         Parameters(args): Parameters<ValidateArgs>,
-    ) -> Result<Json<ValidateOut>, McpError> {
+    ) -> Result<Json<ValidateOut>, Json<ToolErrorOut>> {
         let result = validate_data(
             &ValidateRequest {
-                source: args.source.as_ref().map(to_source).transpose()?,
+                source: args
+                    .source
+                    .as_ref()
+                    .map(to_source)
+                    .transpose()
+                    .map_err(tool_fail)?,
                 schema: args
                     .schema
                     .as_ref()
                     .map(schema_from_json_value)
                     .transpose()
-                    .map_err(tool_err)?,
-                plan: args.plan.as_ref().map(parse_plan_value).transpose()?,
+                    .map_err(tool_fail)?,
+                plan: args
+                    .plan
+                    .as_ref()
+                    .map(parse_plan_value)
+                    .transpose()
+                    .map_err(tool_fail)?,
                 infer: InferMode::Conservative,
             },
             &self.state.config,
         )
-        .map_err(tool_err)?;
+        .map_err(tool_fail)?;
         Ok(Json(ValidateOut {
             valid: result.valid,
             errors: result
@@ -391,15 +441,18 @@ impl ShapePortMcp {
         name = "shapeport_query",
         description = "Run bounded SQL over explicitly registered sources"
     )]
-    fn query(&self, Parameters(args): Parameters<QueryArgs>) -> Result<Json<DataOut>, McpError> {
+    fn query(
+        &self,
+        Parameters(args): Parameters<QueryArgs>,
+    ) -> Result<Json<DataOut>, Json<ToolErrorOut>> {
         let mut sources = std::collections::HashMap::new();
         if let Some(map) = args.sources {
             for (name, source) in map {
-                sources.insert(name, to_source(&source)?);
+                sources.insert(name, to_source(&source).map_err(tool_fail)?);
             }
         }
         if let Some(source) = args.source {
-            sources.insert("input".into(), to_source(&source)?);
+            sources.insert("input".into(), to_source(&source).map_err(tool_fail)?);
         }
         let format = parse_format(args.output_format.as_deref(), FormatId::Json);
         let result = query_sources(
@@ -411,8 +464,8 @@ impl ShapePortMcp {
             },
             &self.state.config,
         )
-        .map_err(tool_err)?;
-        pack_data(result, format, &self.state.config)
+        .map_err(tool_fail)?;
+        pack_data(&result, format, &self.state.config)
     }
 
     #[tool(
@@ -422,19 +475,23 @@ impl ShapePortMcp {
     fn convert(
         &self,
         Parameters(args): Parameters<ConvertArgs>,
-    ) -> Result<Json<DataOut>, McpError> {
-        let to = FormatId::parse(&args.to)
-            .ok_or_else(|| McpError::invalid_params("unknown output format", None))?;
+    ) -> Result<Json<DataOut>, Json<ToolErrorOut>> {
+        let to = FormatId::parse(&args.to).ok_or_else(|| {
+            tool_fail(shapeport_core::Error::usage(
+                "unknown_format",
+                "unknown output format",
+            ))
+        })?;
         let result = convert_data(
             &ConvertRequest {
-                source: to_source(&args.source)?,
+                source: to_source(&args.source).map_err(tool_fail)?,
                 to,
                 infer: InferMode::Conservative,
             },
             &self.state.config,
         )
-        .map_err(tool_err)?;
-        pack_data(result, to, &self.state.config)
+        .map_err(tool_fail)?;
+        pack_data(&result, to, &self.state.config)
     }
 }
 
@@ -443,14 +500,29 @@ impl ShapePortMcp {
     version = "0.1.0",
     instructions = "Schema-driven data transformation runtime. Prefer inspect → plan → transform. Large results return shapeport-artifact:// URIs."
 )]
-impl ServerHandler for ShapePortMcp {}
+impl ServerHandler for ShapePortMcp {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_protocol_version(ProtocolVersion::V_2026_07_28)
+            .with_server_info(Implementation::new("shapeport", "0.1.0"))
+            .with_instructions(
+                "Schema-driven data transformation runtime. \
+                 Prefer inspect → plan → transform. \
+                 Large results return shapeport-artifact:// URIs.",
+            )
+    }
 
-fn emit_schema(schema: shapeport_core::Schema, dialect: &str) -> SchemaOut {
-    let fingerprint = shapeport_core::schema_fingerprint(&schema);
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(&[ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25])
+    }
+}
+
+fn emit_schema(schema: &shapeport_core::Schema, dialect: &str) -> SchemaOut {
+    let fingerprint = schema_fingerprint(schema);
     let rendered = if dialect == "json-schema" {
-        schema_as_json(&schema)
+        schema_as_json(schema)
     } else {
-        serde_json::to_value(&schema).unwrap_or(JsonValue::Null)
+        serde_json::to_value(schema).unwrap_or(JsonValue::Null)
     };
     SchemaOut {
         schema: rendered,
@@ -460,40 +532,38 @@ fn emit_schema(schema: shapeport_core::Schema, dialect: &str) -> SchemaOut {
     }
 }
 
+fn collect_diagnostics(diags: &[shapeport_core::Diagnostic]) -> Vec<JsonValue> {
+    diags
+        .iter()
+        .map(|d| serde_json::to_value(d).unwrap_or(JsonValue::Null))
+        .collect()
+}
+
+fn make_receipt(rows: u64, bytes: u64, format: FormatId) -> JsonValue {
+    serde_json::json!({
+        "rows": rows,
+        "bytes": bytes,
+        "format": format.as_str(),
+    })
+}
+
+fn artifact_expires_at(ttl_secs: u64) -> String {
+    let delta = i64::try_from(ttl_secs).unwrap_or(i64::MAX);
+    Utc::now()
+        .checked_add_signed(chrono::Duration::seconds(delta))
+        .map_or_else(|| Utc::now().to_rfc3339(), |dt| dt.to_rfc3339())
+}
+
 fn pack_data(
-    result: shapeport_core::TransformResult,
+    result: &shapeport_core::TransformResult,
     format: FormatId,
     config: &RuntimeConfig,
-) -> Result<Json<DataOut>, McpError> {
+) -> Result<Json<DataOut>, Json<ToolErrorOut>> {
     let rows = result.records.len() as u64;
     let bytes = result.bytes.len() as u64;
+    let diagnostics = collect_diagnostics(&result.diagnostics);
     if bytes > config.mcp.inline_max_bytes || rows > config.mcp.inline_max_rows {
-        let digest = hex::encode(Sha256::digest(&result.bytes));
-        let dir = config
-            .filesystem
-            .write_roots
-            .first()
-            .cloned()
-            .unwrap_or_else(|| std::path::PathBuf::from(".shapeport"));
-        let path = dir.join("artifacts").join(&digest);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|err| McpError::internal_error(err.to_string(), None))?;
-        }
-        std::fs::write(&path, &result.bytes)
-            .map_err(|err| McpError::internal_error(err.to_string(), None))?;
-        return Ok(Json(DataOut {
-            status: "ok".into(),
-            result: None,
-            artifact: Some(ArtifactOut {
-                uri: format!("shapeport-artifact://{digest}"),
-                format: format.as_str().into(),
-                bytes,
-                rows,
-                sha256: digest,
-            }),
-            diagnostics: Vec::new(),
-        }));
+        return pack_artifact(result, format, config, rows, bytes, diagnostics);
     }
     let payload = if format == FormatId::Json || format == FormatId::Jsonl {
         serde_json::to_value(&result.records).unwrap_or(JsonValue::Null)
@@ -504,11 +574,56 @@ fn pack_data(
         status: "ok".into(),
         result: Some(payload),
         artifact: None,
-        diagnostics: Vec::new(),
+        receipt: Some(make_receipt(rows, bytes, format)),
+        diagnostics,
     }))
 }
 
-fn to_source(src: &SourceRef) -> Result<SourceSpec, McpError> {
+fn pack_artifact(
+    result: &shapeport_core::TransformResult,
+    format: FormatId,
+    config: &RuntimeConfig,
+    rows: u64,
+    bytes: u64,
+    diagnostics: Vec<JsonValue>,
+) -> Result<Json<DataOut>, Json<ToolErrorOut>> {
+    let digest = hex::encode(Sha256::digest(&result.bytes));
+    let dir = config
+        .filesystem
+        .write_roots
+        .first()
+        .cloned()
+        .unwrap_or_else(|| std::path::PathBuf::from(".shapeport"));
+    let path = dir.join("artifacts").join(&digest);
+    path.parent()
+        .map(|parent| {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| tool_fail(shapeport_core::Error::io_err(e.to_string())))
+        })
+        .transpose()?;
+    std::fs::write(&path, &result.bytes)
+        .map_err(|e| tool_fail(shapeport_core::Error::io_err(e.to_string())))?;
+    let schema_fp = result.schema.as_ref().map(schema_fingerprint);
+    let expires_at = artifact_expires_at(config.mcp.artifact_ttl_secs);
+    Ok(Json(DataOut {
+        status: "ok".into(),
+        result: None,
+        artifact: Some(ArtifactOut {
+            uri: format!("shapeport-artifact://{digest}"),
+            format: format.as_str().into(),
+            bytes,
+            rows,
+            sha256: digest,
+            schema_fingerprint: schema_fp,
+            expires_at: Some(expires_at),
+            local_path: None, // set when config.mcp.local_filesystem is true
+        }),
+        receipt: Some(make_receipt(rows, bytes, format)),
+        diagnostics,
+    }))
+}
+
+fn to_source(src: &SourceRef) -> Result<SourceSpec, shapeport_core::Error> {
     Ok(SourceSpec {
         uri: src.uri.clone(),
         format: src.format.as_deref().and_then(FormatId::parse),
@@ -517,15 +632,14 @@ fn to_source(src: &SourceRef) -> Result<SourceSpec, McpError> {
             .as_ref()
             .map(|value| serde_json::from_value::<Value>(value.clone()))
             .transpose()
-            .map_err(|err| McpError::invalid_params(err.to_string(), None))?,
+            .map_err(|e| shapeport_core::Error::parse("invalid_inline", e.to_string()))?,
         bytes: None,
     })
 }
 
-fn parse_plan_value(value: &JsonValue) -> Result<TransformationPlan, McpError> {
-    let raw = serde_json::to_string(value)
-        .map_err(|err| McpError::invalid_params(err.to_string(), None))?;
-    parse_plan_json(&raw).map_err(tool_err)
+fn parse_plan_value(value: &JsonValue) -> Result<TransformationPlan, shapeport_core::Error> {
+    let raw = serde_json::to_string(value)?;
+    parse_plan_json(&raw)
 }
 
 fn parse_infer(raw: Option<&str>) -> InferMode {
@@ -550,8 +664,14 @@ fn parse_policy(raw: Option<&str>) -> ErrorPolicy {
     }
 }
 
-fn tool_err(err: shapeport_core::Error) -> McpError {
-    McpError::invalid_params(err.to_string(), None)
+fn tool_fail(err: shapeport_core::Error) -> Json<ToolErrorOut> {
+    Json(ToolErrorOut {
+        status: "error".into(),
+        kind: err.kind.to_string(),
+        code: err.code,
+        message: err.message,
+        diagnostics: Vec::new(),
+    })
 }
 
 /// Serve MCP over stdio. stdout is protocol-only.
@@ -563,17 +683,20 @@ pub async fn serve_stdio(config: RuntimeConfig) -> Result<(), String> {
 }
 
 /// Serve MCP over stateless Streamable HTTP.
+///
+/// Non-loopback binds require `config.mcp.bearer_token` to be set; callers
+/// receive `401 Unauthorized` when no `Authorization: Bearer <token>` header
+/// is present. When `bind` is unspecified (`0.0.0.0` / `::`), `Host`
+/// validation is disabled because the public hostname is unknown at startup —
+/// Bearer is still enforced.
 pub async fn serve_http(bind: SocketAddr, config: RuntimeConfig) -> Result<(), String> {
     let require_auth = !bind.ip().is_loopback();
     let token = config.mcp.bearer_token.clone();
     if require_auth && token.is_none() {
         return Err("non-loopback bind requires SHAPEPORT_MCP_TOKEN".into());
     }
-    let origins = config.mcp.origin_allowlist.clone();
+    let http_config = build_http_config(bind, &config);
     let shared = Arc::new(config.clone());
-    let http_config = StreamableHttpServerConfig::default()
-        .with_legacy_session_mode(false)
-        .with_json_response(true);
     let service = StreamableHttpService::new(
         {
             let shared = Arc::clone(&shared);
@@ -582,15 +705,15 @@ pub async fn serve_http(bind: SocketAddr, config: RuntimeConfig) -> Result<(), S
         LocalSessionManager::default().into(),
         http_config,
     );
-    let auth_state = AuthState {
-        require_auth,
-        token,
-        origins,
+    let base = Router::new().nest_service("/mcp", service);
+    let router = if require_auth {
+        let auth_state = AuthState {
+            token: token.unwrap_or_default(),
+        };
+        base.layer(middleware::from_fn_with_state(auth_state, auth_bearer))
+    } else {
+        base
     };
-    let router = Router::new()
-        .nest_service("/mcp", service)
-        .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
-        .layer(middleware::from_fn_with_state(auth_state, auth_origin));
     let listener = TcpListener::bind(bind)
         .await
         .map_err(|err| err.to_string())?;
@@ -599,48 +722,90 @@ pub async fn serve_http(bind: SocketAddr, config: RuntimeConfig) -> Result<(), S
         .map_err(|err| err.to_string())
 }
 
-#[derive(Clone)]
-struct AuthState {
-    require_auth: bool,
-    token: Option<String>,
-    origins: Vec<String>,
+fn build_http_config(bind: SocketAddr, config: &RuntimeConfig) -> StreamableHttpServerConfig {
+    let cfg = StreamableHttpServerConfig::default()
+        .with_legacy_session_mode(false)
+        .with_json_response(true)
+        .with_max_request_body_bytes(32 * 1024 * 1024);
+    let cfg = if config.mcp.origin_allowlist.is_empty() {
+        cfg
+    } else {
+        cfg.with_allowed_origins(config.mcp.origin_allowlist.clone())
+    };
+    configure_allowed_hosts(cfg, bind)
 }
 
-async fn auth_origin(
+/// Configure `Host` validation for the given bind address.
+///
+/// - Loopback: keep rmcp defaults (`localhost`, `127.0.0.1`, `::1`).
+/// - Unspecified (`0.0.0.0` / `::`): disable validation; the public hostname is
+///   not known at startup and Bearer auth is still enforced.
+/// - Specific non-loopback IP: allow the bind IP and `ip:port` in addition to
+///   loopback names.
+fn configure_allowed_hosts(
+    cfg: StreamableHttpServerConfig,
+    bind: SocketAddr,
+) -> StreamableHttpServerConfig {
+    let ip = bind.ip();
+    if ip.is_loopback() {
+        cfg
+    } else if ip.is_unspecified() {
+        cfg.disable_allowed_hosts()
+    } else {
+        cfg.with_allowed_hosts([
+            "localhost".to_string(),
+            "127.0.0.1".to_string(),
+            "::1".to_string(),
+            ip.to_string(),
+            bind.to_string(),
+        ])
+    }
+}
+
+#[derive(Clone)]
+struct AuthState {
+    token: String,
+}
+
+async fn auth_bearer(
     axum::extract::State(state): axum::extract::State<AuthState>,
     headers: HeaderMap,
     request: axum::extract::Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if let Some(origin) = headers.get(axum::http::header::ORIGIN) {
-        if !origin_allowed(origin, &state.origins) {
-            return Err(StatusCode::FORBIDDEN);
-        }
-    } else if !state.origins.is_empty() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    if state.require_auth {
-        let expected = state.token.as_deref().ok_or(StatusCode::UNAUTHORIZED)?;
-        let header = headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-        let provided = header
-            .strip_prefix("Bearer ")
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-        if provided != expected {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    }
+    check_bearer(&headers, &state.token)?;
     Ok(next.run(request).await)
 }
 
-fn origin_allowed(origin: &HeaderValue, allow: &[String]) -> bool {
-    if allow.is_empty() {
-        return true;
+fn check_bearer(headers: &HeaderMap, expected: &str) -> Result<(), StatusCode> {
+    let header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let provided = header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    if provided != expected {
+        return Err(StatusCode::UNAUTHORIZED);
     }
-    origin
-        .to_str()
-        .ok()
-        .is_some_and(|value| allow.iter().any(|item| item == value))
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RuntimeConfig, SocketAddr, serve_http};
+
+    /// `serve_http` must return an error before binding when the address is
+    /// non-loopback and no bearer token is configured.
+    #[tokio::test]
+    async fn serve_http_requires_token_for_non_loopback() {
+        let bind: SocketAddr = "0.0.0.0:0".parse().expect("valid addr");
+        let result = serve_http(bind, RuntimeConfig::default()).await;
+        assert!(result.is_err(), "expected Err, got Ok");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("SHAPEPORT_MCP_TOKEN"),
+            "expected token hint in message, got: {msg}"
+        );
+    }
 }
