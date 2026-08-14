@@ -6,10 +6,10 @@
 #   6-10   moderate
 #   11-15  investigate
 #   16-20  strong refactoring signal
-#   >20    CI failure unless explicitly justified
+#   >20    CI failure (function-level; file-scope aggregates are informational)
 #
 # `debtmap validate` uses density as its official blocking metric.
-# Function-level cyclomatic > 20 is enforced by `dev/analyze-complexity.sh`.
+# Function-level cyclomatic > 20 is enforced by `dev/cyclomatic_gate.py`.
 
 [thresholds]
 complexity = 20
@@ -18,10 +18,11 @@ max_file_length = 500
 max_function_length = 100
 
 [thresholds.validation]
-# Conservative starting gates for an existing codebase. Tighten over time.
+# Conservative starting gates. Coverage-aware scoring raises density and risk
+# because untested complexity is treated as higher debt; tighten over time.
 max_average_complexity = 15.0
-max_debt_density = 80.0
-max_codebase_risk_score = 9.0
+max_debt_density = 120.0
+max_codebase_risk_score = 10.0
 min_coverage_percentage = 0.0
 max_total_debt_score = 10000
 

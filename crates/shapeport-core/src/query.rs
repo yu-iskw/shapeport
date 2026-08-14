@@ -390,7 +390,7 @@ fn eval_compare(op: &BinaryOperator, left: &Value, right: &Value) -> bool {
         BinaryOperator::Lt => values_cmp(left, right) == Ordering::Less,
         BinaryOperator::GtEq => values_cmp(left, right) != Ordering::Less,
         BinaryOperator::LtEq => values_cmp(left, right) != Ordering::Greater,
-        _ => false,
+        _ => unreachable!("eval_compare called with non-comparison operator: {op}"),
     }
 }
 
@@ -398,7 +398,7 @@ fn eval_logic(op: &BinaryOperator, left: &Value, right: &Value) -> bool {
     match op {
         BinaryOperator::And => left.is_truthy() && right.is_truthy(),
         BinaryOperator::Or => left.is_truthy() || right.is_truthy(),
-        _ => false,
+        _ => unreachable!("eval_logic called with non-logical operator: {op}"),
     }
 }
 
@@ -410,12 +410,7 @@ fn eval_arith(op: &BinaryOperator, left: &Value, right: &Value) -> Result<Value>
         BinaryOperator::Minus => left_n - right_n,
         BinaryOperator::Multiply => left_n * right_n,
         BinaryOperator::Divide => left_n / right_n,
-        _ => {
-            return Err(Error::usage(
-                "sql_op",
-                format!("unsupported arithmetic operator {op}"),
-            ));
-        }
+        _ => unreachable!("eval_arith called with non-arithmetic operator: {op}"),
     };
     Ok(Value::Float(result))
 }
@@ -486,7 +481,7 @@ fn i64_to_f64(value: i64) -> f64 {
     value as f64
 }
 
-fn values_cmp(left: &Value, right: &Value) -> std::cmp::Ordering {
+fn values_cmp(left: &Value, right: &Value) -> Ordering {
     match (numeric_rank(left), numeric_rank(right)) {
         (Some(left_n), Some(right_n)) => left_n.total_cmp(&right_n),
         _ => stringify(left).cmp(&stringify(right)),
@@ -531,11 +526,11 @@ fn sort_by(order: &OrderBy, rows: &mut [Value]) -> Result<()> {
             if item.options.asc == Some(false) {
                 ord = ord.reverse();
             }
-            if ord != std::cmp::Ordering::Equal {
+            if ord != Ordering::Equal {
                 return ord;
             }
         }
-        std::cmp::Ordering::Equal
+        Ordering::Equal
     });
     Ok(())
 }

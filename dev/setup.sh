@@ -22,36 +22,15 @@ MODULE_DIR="$(dirname "${SCRIPT_DIR}")"
 
 cd "${MODULE_DIR}"
 
+# shellcheck source=lib.sh
+source "${SCRIPT_DIR}/lib.sh"
+
 if ! command -v cargo &>/dev/null; then
   echo "Error: cargo is not installed."
   echo "Install Rust from https://rustup.rs/ and rerun make setup."
   exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# Helper: install a cargo tool idempotently
-# Prefer cargo-binstall when available (faster); fall back to cargo install.
-# Usage: install_cargo_tool <binary-name> <crate-name>
-# ---------------------------------------------------------------------------
-install_cargo_tool() {
-  local binary="$1"
-  local crate="$2"
-  if command -v "${binary}" &>/dev/null; then
-    echo "  [skip]    ${crate} (${binary} already on PATH)"
-    return 0
-  fi
-  if command -v cargo-binstall &>/dev/null; then
-    echo "  [install] ${crate} via cargo-binstall"
-    cargo binstall -y "${crate}"
-  else
-    echo "  [install] ${crate} via cargo install --locked"
-    cargo install "${crate}" --locked
-  fi
-}
-
-# ---------------------------------------------------------------------------
-# Step 1: fetch workspace dependencies
-# ---------------------------------------------------------------------------
 echo "==> Fetching workspace dependencies..."
 cargo fetch
 

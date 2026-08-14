@@ -14,6 +14,10 @@ CLAUDE.local.md
 codeql-results.sarif
 codeql-summary.txt
 
+# Python bytecode from local script gates
+__pycache__/
+*.pyc
+
 # Coverage and maintainability artifacts (generated, do not commit)
 coverage.lcov
 coverage/

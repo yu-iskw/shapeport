@@ -47,9 +47,8 @@ jobs:
       - name: Run Miri
         env:
           INSTALL_NIGHTLY: "1"
-          SKIP_UDEPS: "1"
           MIRIFLAGS: "-Zmiri-disable-isolation"
-        run: bash ./dev/deep-analysis.sh
+        run: bash ./dev/miri.sh
 
   udeps:
     name: Unused Dependencies
@@ -72,4 +71,6 @@ jobs:
           tool: cargo-udeps
 
       - name: Check for unused dependencies
-        run: cargo +nightly udeps --workspace --all-targets --all-features
+        env:
+          INSTALL_NIGHTLY: "1"
+        run: bash ./dev/udeps.sh

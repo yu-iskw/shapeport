@@ -15,14 +15,26 @@ set -Eeuo pipefail
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Nightly deep analysis: Miri, then cargo-udeps.
-# Nightly is NOT installed automatically unless INSTALL_NIGHTLY=1 is set.
-
 SCRIPT_FILE="$(readlink -f "$0")"
 SCRIPT_DIR="$(dirname "${SCRIPT_FILE}")"
+MODULE_DIR="$(dirname "${SCRIPT_DIR}")"
 
-bash "${SCRIPT_DIR}/miri.sh"
-bash "${SCRIPT_DIR}/udeps.sh"
+cd "${MODULE_DIR}"
+
+# shellcheck source=lib.sh
+source "${SCRIPT_DIR}/lib.sh"
+
+require_nightly
+install_cargo_tool cargo-udeps cargo-udeps
 
 echo ""
-echo "==> deep-analysis: all nightly checks passed."
+echo "==> Running cargo +nightly udeps --workspace ..."
+if ! cargo +nightly udeps --workspace --all-targets --all-features; then
+	echo ""
+	echo "ERROR: cargo-udeps found unused dependencies."
+	echo "  Remove them from Cargo.toml after confirming cargo-shear agrees."
+	exit 1
+fi
+
+echo ""
+echo "==> udeps: passed."

@@ -73,8 +73,12 @@ fi
 # Run semver checks for published crates
 # ---------------------------------------------------------------------------
 echo ""
-echo "==> Running cargo semver-checks check-release --workspace ..."
-cargo semver-checks check-release --workspace
+pkg_args=()
+for crate in "${PUBLISHED[@]}"; do
+	pkg_args+=(-p "${crate}")
+done
+echo "==> Running cargo semver-checks check-release ${pkg_args[*]} ..."
+cargo semver-checks check-release "${pkg_args[@]}"
 
 echo ""
 echo "==> semver-checks: all semver compatibility checks passed."

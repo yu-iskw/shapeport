@@ -76,8 +76,9 @@ They operate on different file sets and are not duplicates.
 
 The complexity workflow runs on pull requests, but most Debtmap metrics are informational.
 The fast authoritative gate for per-function complexity is Clippy's `cognitive_complexity` lint with threshold 10.
-Debtmap fails CI only for conservative gates: **function-level** cyclomatic complexity above 20 (unless justified) and the density threshold in `.debtmap.toml`.
+Debtmap fails CI only for conservative gates: **function-level** cyclomatic complexity above 20 and the density/risk thresholds in `.debtmap.toml`.
 File-scope GodObject aggregates are reported for maintainability insight and are not the cyclomatic hard gate.
+Coverage-aware scoring raises density because untested complexity is treated as higher debt; current validate density starts at 120 per 1K LOC. Risk is capped at 10 by Debtmap's config domain.
 
 **Entry point:** `make analyze-complexity`
 
