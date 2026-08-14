@@ -1,7 +1,6 @@
 //! Strict/smart mapping planner.
 
 use indexmap::IndexMap;
-
 use serde::{Deserialize, Serialize};
 
 use crate::config::PlannerConfig;
@@ -10,7 +9,7 @@ use crate::error::{Error, Result};
 use crate::fingerprint::schema_fingerprint;
 use crate::path::FieldPath;
 use crate::plan::{Expr, GeneratedBy, Operation, PlanMetadata, TransformationPlan};
-use crate::schema::{Field, Schema, types_compatible};
+use crate::schema::{Field, Schema, Type, types_compatible};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlannerMode {
@@ -91,6 +90,20 @@ pub enum PlanOutcome {
     },
 }
 
+#[derive(Clone, Debug)]
+struct FieldRef<'a> {
+    path: String,
+    field: &'a Field,
+}
+
+struct BuildContext<'a> {
+    sources: Vec<FieldRef<'a>>,
+    options: &'a PlannerOptions,
+    used_sources: Vec<String>,
+    explanation: Vec<ExplainEntry>,
+    unresolved: Vec<Unresolved>,
+}
+
 pub fn plan_schemas(
     source: &Schema,
     target: &Schema,
@@ -98,60 +111,22 @@ pub fn plan_schemas(
 ) -> Result<PlanOutcome> {
     let source_fields = source.require_record_fields()?;
     let target_fields = target.require_record_fields()?;
-    let mut explanation = Vec::new();
-    let mut unresolved = Vec::new();
-    let mut fields = IndexMap::new();
-    let mut used_sources = Vec::new();
+    let mut sources = Vec::new();
+    collect_source_fields(source_fields, "", &mut sources);
 
-    for target_field in target_fields {
-        match assign_field(target_field, source_fields, options, &used_sources) {
-            Assign::Mapped(candidate) => {
-                used_sources.push(candidate.source.clone());
-                let path = FieldPath::parse(&candidate.source)?;
-                fields.insert(target_field.name.clone(), Expr::Field(path));
-                explanation.push(ExplainEntry {
-                    target: target_field.name.clone(),
-                    source: Some(candidate.source.clone()),
-                    score: candidate.score,
-                    reasons: candidate.reasons.clone(),
-                    action: format!("map {} -> {}", candidate.source, target_field.name),
-                });
-            }
-            Assign::Ambiguous(candidates) => {
-                unresolved.push(Unresolved {
-                    target: target_field.name.clone(),
-                    candidates,
-                });
-                explanation.push(ExplainEntry {
-                    target: target_field.name.clone(),
-                    source: None,
-                    score: 0.0,
-                    reasons: vec!["ambiguous".into()],
-                    action: "no mapping selected".into(),
-                });
-            }
-            Assign::Missing if target_field.nullable => {
-                explanation.push(ExplainEntry {
-                    target: target_field.name.clone(),
-                    source: None,
-                    score: 0.0,
-                    reasons: vec!["optional unmatched".into()],
-                    action: "omit".into(),
-                });
-            }
-            Assign::Missing => {
-                unresolved.push(Unresolved {
-                    target: target_field.name.clone(),
-                    candidates: Vec::new(),
-                });
-            }
-        }
-    }
+    let mut context = BuildContext {
+        sources,
+        options,
+        used_sources: Vec::new(),
+        explanation: Vec::new(),
+        unresolved: Vec::new(),
+    };
+    let fields = build_target_fields(target_fields, "", &mut context)?;
 
-    if !unresolved.is_empty() {
+    if !context.unresolved.is_empty() {
         return Ok(PlanOutcome::Ambiguous {
-            unresolved,
-            explanation,
+            unresolved: context.unresolved,
+            explanation: context.explanation,
             diagnostics: vec![Diagnostic {
                 severity: Severity::Error,
                 code: "ambiguous_mapping".into(),
@@ -185,9 +160,111 @@ pub fn plan_schemas(
     });
     Ok(PlanOutcome::Ready {
         plan: Box::new(plan),
-        explanation,
+        explanation: context.explanation,
         diagnostics: Vec::new(),
     })
+}
+
+fn collect_source_fields<'a>(fields: &'a [Field], prefix: &str, out: &mut Vec<FieldRef<'a>>) {
+    for field in fields {
+        let path = join_path(prefix, &field.name);
+        match &field.ty {
+            Type::Record { fields } => collect_source_fields(fields, &path, out),
+            _ => out.push(FieldRef { path, field }),
+        }
+    }
+}
+
+fn build_target_fields(
+    target_fields: &[Field],
+    prefix: &str,
+    context: &mut BuildContext<'_>,
+) -> Result<IndexMap<String, Expr>> {
+    let mut fields = IndexMap::new();
+    for target_field in target_fields {
+        let target_path = join_path(prefix, &target_field.name);
+        if let Type::Record {
+            fields: nested_fields,
+        } = &target_field.ty
+        {
+            let nested = build_target_fields(nested_fields, &target_path, context)?;
+            fields.insert(target_field.name.clone(), Expr::Object(nested));
+            continue;
+        }
+        if let Some(expr) = build_target_leaf(target_field, &target_path, context)? {
+            fields.insert(target_field.name.clone(), expr);
+        }
+    }
+    Ok(fields)
+}
+
+fn build_target_leaf(
+    target_field: &Field,
+    target_path: &str,
+    context: &mut BuildContext<'_>,
+) -> Result<Option<Expr>> {
+    let target = FieldRef {
+        path: target_path.to_string(),
+        field: target_field,
+    };
+    match assign_field(
+        &target,
+        &context.sources,
+        context.options,
+        &context.used_sources,
+    ) {
+        Assign::Mapped(candidate) => {
+            context.used_sources.push(candidate.source.clone());
+            let path = FieldPath::parse(&candidate.source)?;
+            context.explanation.push(ExplainEntry {
+                target: target_path.to_string(),
+                source: Some(candidate.source.clone()),
+                score: candidate.score,
+                reasons: candidate.reasons.clone(),
+                action: format!("map {} -> {target_path}", candidate.source),
+            });
+            Ok(Some(Expr::Field(path)))
+        }
+        Assign::Ambiguous(candidates) => {
+            context.unresolved.push(Unresolved {
+                target: target_path.to_string(),
+                candidates,
+            });
+            context.explanation.push(ExplainEntry {
+                target: target_path.to_string(),
+                source: None,
+                score: 0.0,
+                reasons: vec!["ambiguous".into()],
+                action: "no mapping selected".into(),
+            });
+            Ok(None)
+        }
+        Assign::Missing if target_field.nullable => {
+            context.explanation.push(ExplainEntry {
+                target: target_path.to_string(),
+                source: None,
+                score: 0.0,
+                reasons: vec!["optional unmatched".into()],
+                action: "omit".into(),
+            });
+            Ok(None)
+        }
+        Assign::Missing => {
+            context.unresolved.push(Unresolved {
+                target: target_path.to_string(),
+                candidates: Vec::new(),
+            });
+            Ok(None)
+        }
+    }
+}
+
+fn join_path(prefix: &str, field: &str) -> String {
+    if prefix.is_empty() {
+        field.to_string()
+    } else {
+        format!("{prefix}.{field}")
+    }
 }
 
 enum Assign {
@@ -197,15 +274,15 @@ enum Assign {
 }
 
 fn assign_field(
-    target: &Field,
-    sources: &[Field],
+    target: &FieldRef<'_>,
+    sources: &[FieldRef<'_>],
     options: &PlannerOptions,
     used: &[String],
 ) -> Assign {
     let mut ranked: Vec<Candidate> = sources
         .iter()
-        .filter(|src| !used.contains(&src.name))
-        .filter_map(|src| score_pair(src, target, options.mode))
+        .filter(|source| !used.contains(&source.path))
+        .filter_map(|source| score_pair(source, target, options.mode))
         .collect();
     ranked.sort_by(|a, b| b.score.total_cmp(&a.score));
     select_candidate(ranked, options)
@@ -232,61 +309,89 @@ fn select_candidate(ranked: Vec<Candidate>, options: &PlannerOptions) -> Assign 
     Assign::Mapped(best.clone())
 }
 
-fn score_pair(source: &Field, target: &Field, mode: PlannerMode) -> Option<Candidate> {
-    if !types_compatible(&source.ty, &target.ty) {
+fn score_pair(
+    source: &FieldRef<'_>,
+    target: &FieldRef<'_>,
+    mode: PlannerMode,
+) -> Option<Candidate> {
+    if !types_compatible(&source.field.ty, &target.field.ty) {
         return None;
     }
+
     let mut reasons: Vec<String> = Vec::new();
     let mut score = 0.0;
-    if source.name == target.name {
-        // Exact names are strong structural evidence. With an exact type match this
-        // scores 1.0, clearing the strict auto-accept threshold.
+    let mut direct_name_evidence = false;
+
+    if source.field.name == target.field.name {
         score += 0.80;
         reasons.push("exact-name match".into());
-    } else if source.aliases.iter().any(|alias| alias == &target.name) {
-        // Explicit aliases are user/schema-provided evidence and are as strong as
-        // an exact name for deterministic planning.
+        direct_name_evidence = true;
+    } else if source
+        .field
+        .aliases
+        .iter()
+        .any(|alias| alias == &target.field.name)
+    {
         score += 0.80;
         reasons.push("alias match".into());
+        direct_name_evidence = true;
     }
-    let normalized_eq = normalize_name(&source.name) == normalize_name(&target.name);
-    if mode == PlannerMode::Smart && normalized_eq && source.name != target.name {
-        // A normalized name plus an exact type scores 0.95. Keep this below an
-        // exact/alias match so collisions remain detectable as ambiguity.
+
+    let normalized_eq = normalize_name(&source.field.name) == normalize_name(&target.field.name);
+    if mode == PlannerMode::Smart && normalized_eq && source.field.name != target.field.name {
         score += 0.75;
         reasons.push("normalized-name match".into());
+        direct_name_evidence = true;
     }
+
+    if mode == PlannerMode::Smart && !direct_name_evidence && normalized_path_match(source, target)
+    {
+        score += 0.75;
+        reasons.push("normalized-path match".into());
+    }
+
     if mode == PlannerMode::Smart
-        && let Some(syn) = synonym_bonus(&source.name, &target.name)
+        && let Some(syn) = synonym_bonus(&source.field.name, &target.field.name)
     {
         score += syn;
         reasons.push("common-name synonym".into());
     }
-    if types_equalish(&source.ty, &target.ty) {
+
+    if types_equalish(&source.field.ty, &target.field.ty) {
         score += 0.20;
         reasons.push("exact type match".into());
     } else {
         score += 0.10;
         reasons.push("compatible type".into());
     }
+
     if score <= 0.0 {
         return None;
     }
     if mode == PlannerMode::Strict
         && !reasons
             .iter()
-            .any(|r| r.contains("exact-name") || r.contains("alias"))
+            .any(|reason| reason.contains("exact-name") || reason.contains("alias"))
     {
         return None;
     }
+
     Some(Candidate {
-        source: source.name.clone(),
+        source: source.path.clone(),
         score,
         reasons,
     })
 }
 
-fn types_equalish(left: &crate::schema::Type, right: &crate::schema::Type) -> bool {
+fn normalized_path_match(source: &FieldRef<'_>, target: &FieldRef<'_>) -> bool {
+    let source_path = normalize_name(&source.path);
+    let target_path = normalize_name(&target.path);
+    let source_name = normalize_name(&source.field.name);
+    let target_name = normalize_name(&target.field.name);
+    source_path == target_path || source_path == target_name || source_name == target_path
+}
+
+fn types_equalish(left: &Type, right: &Type) -> bool {
     std::mem::discriminant(left) == std::mem::discriminant(right)
 }
 
@@ -314,7 +419,6 @@ fn synonym_bonus(source: &str, target: &str) -> Option<f64> {
     let dst = normalize_name(target);
     PAIRS.iter().find_map(|(left, right)| {
         if (src == *left && dst == *right) || (src == *right && dst == *left) {
-            // 0.65 + 0.20 (type match) = 0.85, clearing the 0.80 ambiguity threshold.
             Some(0.65)
         } else {
             None
@@ -324,8 +428,13 @@ fn synonym_bonus(source: &str, target: &str) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    use indexmap::IndexMap;
+
     use super::{PlanOutcome, PlannerMode, PlannerOptions, plan_schemas};
+    use crate::engine::execute_plan;
+    use crate::plan::{Expr, Operation};
     use crate::schema::{Field, Schema, Type};
+    use crate::value::Value;
 
     #[test]
     fn maps_normalized_names_in_smart_mode() {
@@ -350,17 +459,15 @@ mod tests {
         else {
             panic!("expected PlanOutcome::Ready, got Ambiguous");
         };
-        // Verify the map operation contains the expected field mappings.
         let op = plan.operations.first().expect("operation");
         let fields = match op {
-            crate::plan::Operation::Map { fields } => fields,
+            Operation::Map { fields } => fields,
             other => panic!("expected Map operation, got {other:?}"),
         };
         assert!(fields.contains_key("month"), "missing month mapping");
         assert!(fields.contains_key("product"), "missing product mapping");
         assert!(fields.contains_key("revenue"), "missing revenue mapping");
-        // Explanation should mention each target field.
-        let mentions = |word: &str| explanation.iter().any(|e| e.target == word);
+        let mentions = |word: &str| explanation.iter().any(|entry| entry.target == word);
         assert!(mentions("month"), "explanation missing month");
         assert!(mentions("product"), "explanation missing product");
         assert!(mentions("revenue"), "explanation missing revenue");
@@ -391,5 +498,98 @@ mod tests {
         )
         .expect("plan");
         assert!(matches!(outcome, PlanOutcome::Ready { .. }));
+    }
+
+    #[test]
+    fn maps_nested_source_leaf_to_flat_target() {
+        let source = Schema::record(vec![Field::new(
+            "customer",
+            Type::record(vec![Field::new("name", Type::String, false)]),
+            false,
+        )]);
+        let target = Schema::record(vec![Field::new("customer_name", Type::String, false)]);
+        let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
+        let PlanOutcome::Ready {
+            plan, explanation, ..
+        } = outcome
+        else {
+            panic!("expected ready nested flatten plan");
+        };
+        assert_eq!(explanation[0].target, "customer_name");
+        assert_eq!(explanation[0].source.as_deref(), Some("customer.name"));
+        assert!(
+            explanation[0]
+                .reasons
+                .iter()
+                .any(|reason| reason == "normalized-path match")
+        );
+        let Operation::Map { fields } = &plan.operations[0] else {
+            panic!("expected map operation");
+        };
+        assert!(matches!(fields.get("customer_name"), Some(Expr::Field(_))));
+    }
+
+    #[test]
+    fn constructs_nested_target_object_and_executes_it() {
+        let source = Schema::record(vec![
+            Field::new("first_name", Type::String, false),
+            Field::new("last_name", Type::String, false),
+        ]);
+        let target = Schema::record(vec![Field::new(
+            "person",
+            Type::record(vec![
+                Field::new("first_name", Type::String, false),
+                Field::new("last_name", Type::String, false),
+            ]),
+            false,
+        )]);
+        let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
+        let PlanOutcome::Ready {
+            plan, explanation, ..
+        } = outcome
+        else {
+            panic!("expected ready nested object plan");
+        };
+        assert!(explanation.iter().any(|entry| {
+            entry.target == "person.first_name" && entry.source.as_deref() == Some("first_name")
+        }));
+        assert!(explanation.iter().any(|entry| {
+            entry.target == "person.last_name" && entry.source.as_deref() == Some("last_name")
+        }));
+
+        let mut input = IndexMap::new();
+        input.insert("first_name".into(), Value::String("Ada".into()));
+        input.insert("last_name".into(), Value::String("Lovelace".into()));
+        let output = execute_plan(&plan, vec![Value::Object(input)]).expect("execute nested plan");
+
+        let mut person = IndexMap::new();
+        person.insert("first_name".into(), Value::String("Ada".into()));
+        person.insert("last_name".into(), Value::String("Lovelace".into()));
+        let mut expected = IndexMap::new();
+        expected.insert("person".into(), Value::Object(person));
+        assert_eq!(output, vec![Value::Object(expected)]);
+    }
+
+    #[test]
+    fn duplicate_nested_leaf_names_remain_ambiguous() {
+        let source = Schema::record(vec![
+            Field::new(
+                "billing",
+                Type::record(vec![Field::new("name", Type::String, false)]),
+                false,
+            ),
+            Field::new(
+                "shipping",
+                Type::record(vec![Field::new("name", Type::String, false)]),
+                false,
+            ),
+        ]);
+        let target = Schema::record(vec![Field::new("name", Type::String, false)]);
+        let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
+        let PlanOutcome::Ambiguous { unresolved, .. } = outcome else {
+            panic!("duplicate nested leaf names must remain ambiguous");
+        };
+        assert_eq!(unresolved.len(), 1);
+        assert_eq!(unresolved[0].candidates.len(), 2);
     }
 }

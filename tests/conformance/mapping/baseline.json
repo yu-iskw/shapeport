@@ -1,9 +1,9 @@
 {
   "corpusVersion": 1,
-  "cases": 20,
-  "correctMappings": 16,
+  "cases": 23,
+  "correctMappings": 20,
   "unsafeAutoMappings": 0,
   "correctAmbiguities": 7,
   "falseAmbiguities": 0,
-  "exactPlanSuccesses": 20
+  "exactPlanSuccesses": 23
 }
