@@ -47,4 +47,29 @@ build:
 clean:
 	bash ./dev/clean.sh
 
+# Verify per-feature compilation with cargo-hack
+.PHONY: check-features
+check-features:
+	bash ./dev/check-features.sh
+
+# Generate LCOV coverage report (for Debtmap / gap analysis)
+.PHONY: coverage
+coverage:
+	bash ./dev/coverage.sh
+
+# Maintainability and cyclomatic complexity analysis via Debtmap
+.PHONY: analyze-complexity
+analyze-complexity:
+	bash ./dev/analyze-complexity.sh
+
+# Deep analysis: nightly Miri + cargo-udeps (set INSTALL_NIGHTLY=1 in CI)
+.PHONY: deep-analysis
+deep-analysis:
+	bash ./dev/deep-analysis.sh
+
+# SemVer compatibility check (requires published crates on crates.io)
+.PHONY: semver-checks
+semver-checks:
+	bash ./dev/semver-checks.sh
+
 all: clean lint test build
