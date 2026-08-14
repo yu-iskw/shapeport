@@ -580,7 +580,7 @@ mod tests {
             .expect_err("multi-alias projection");
         let message = err.to_string();
         assert!(
-            message.contains("unsupported select item") || message.contains("sql_parse"),
+            message.contains("unsupported select item"),
             "unexpected error: {message}"
         );
     }
