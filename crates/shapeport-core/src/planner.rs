@@ -288,13 +288,21 @@ fn build_list_mapping(
     else {
         return Ok(None);
     };
-    let (Type::List { element: source_element, .. }, Type::List { element: target_element, .. }) =
-        (&source_ref.field.ty, &target_field.ty)
+    let (
+        Type::List {
+            element: source_element,
+            ..
+        },
+        Type::List {
+            element: target_element,
+            ..
+        },
+    ) = (&source_ref.field.ty, &target_field.ty)
     else {
         return Ok(None);
     };
 
-    if types_compatible(source_element, target_element) {
+    if source_element == target_element {
         context.used_sources.push(candidate.source.clone());
         context.explanation.push(ExplainEntry {
             target: target_path.to_string(),
@@ -376,7 +384,9 @@ fn score_list_pair(
     target: &FieldRef<'_>,
     mode: PlannerMode,
 ) -> Option<Candidate> {
-    if !matches!(source.field.ty, Type::List { .. }) || !matches!(target.field.ty, Type::List { .. }) {
+    if !matches!(source.field.ty, Type::List { .. })
+        || !matches!(target.field.ty, Type::List { .. })
+    {
         return None;
     }
     score_names(source, target, mode, "list container match")
@@ -440,11 +450,16 @@ fn score_pair(
     if !types_compatible(&source.field.ty, &target.field.ty) {
         return None;
     }
-    score_names(source, target, mode, if types_equalish(&source.field.ty, &target.field.ty) {
-        "exact type match"
-    } else {
-        "compatible type"
-    })
+    score_names(
+        source,
+        target,
+        mode,
+        if types_equalish(&source.field.ty, &target.field.ty) {
+            "exact type match"
+        } else {
+            "compatible type"
+        },
+    )
 }
 
 fn score_names(
@@ -587,7 +602,10 @@ mod tests {
             ..PlannerOptions::default()
         };
         let outcome = plan_schemas(&source, &target, &options).expect("plan");
-        let PlanOutcome::Ready { plan, explanation, .. } = outcome else {
+        let PlanOutcome::Ready {
+            plan, explanation, ..
+        } = outcome
+        else {
             panic!("expected PlanOutcome::Ready, got Ambiguous");
         };
         let Operation::Map { fields } = plan.operations.first().expect("operation") else {
@@ -638,12 +656,20 @@ mod tests {
         )]);
         let target = Schema::record(vec![Field::new("customer_name", Type::String, false)]);
         let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
-        let PlanOutcome::Ready { plan, explanation, .. } = outcome else {
+        let PlanOutcome::Ready {
+            plan, explanation, ..
+        } = outcome
+        else {
             panic!("expected ready nested flatten plan");
         };
         assert_eq!(explanation[0].target, "customer_name");
         assert_eq!(explanation[0].source.as_deref(), Some("customer.name"));
-        assert!(explanation[0].reasons.iter().any(|reason| reason == "normalized-path match"));
+        assert!(
+            explanation[0]
+                .reasons
+                .iter()
+                .any(|reason| reason == "normalized-path match")
+        );
         let Operation::Map { fields } = &plan.operations[0] else {
             panic!("expected map operation");
         };
@@ -665,7 +691,10 @@ mod tests {
             false,
         )]);
         let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
-        let PlanOutcome::Ready { plan, explanation, .. } = outcome else {
+        let PlanOutcome::Ready {
+            plan, explanation, ..
+        } = outcome
+        else {
             panic!("expected ready nested object plan");
         };
         assert!(explanation.iter().any(|entry| {
@@ -736,7 +765,10 @@ mod tests {
         let Operation::Map { fields } = &plan.operations[0] else {
             panic!("expected map operation");
         };
-        assert!(matches!(fields.get("customers"), Some(Expr::ListMap { .. })));
+        assert!(matches!(
+            fields.get("customers"),
+            Some(Expr::ListMap { .. })
+        ));
 
         let input = Value::object([(
             "customers".into(),
