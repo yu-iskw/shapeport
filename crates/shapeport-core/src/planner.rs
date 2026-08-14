@@ -203,6 +203,12 @@ fn build_target_leaf(
     target_path: &str,
     context: &mut BuildContext<'_>,
 ) -> Result<Option<Expr>> {
+    if matches!(target_field.ty, Type::List { .. })
+        && let Some(expr) = build_list_mapping(target_field, target_path, context)?
+    {
+        return Ok(Some(expr));
+    }
+
     let target = FieldRef {
         path: target_path.to_string(),
         field: target_field,
@@ -226,17 +232,7 @@ fn build_target_leaf(
             Ok(Some(Expr::Field(path)))
         }
         Assign::Ambiguous(candidates) => {
-            context.unresolved.push(Unresolved {
-                target: target_path.to_string(),
-                candidates,
-            });
-            context.explanation.push(ExplainEntry {
-                target: target_path.to_string(),
-                source: None,
-                score: 0.0,
-                reasons: vec!["ambiguous".into()],
-                action: "no mapping selected".into(),
-            });
+            push_ambiguous(target_path, candidates, context);
             Ok(None)
         }
         Assign::Missing if target_field.nullable => {
@@ -257,6 +253,133 @@ fn build_target_leaf(
             Ok(None)
         }
     }
+}
+
+fn build_list_mapping(
+    target_field: &Field,
+    target_path: &str,
+    context: &mut BuildContext<'_>,
+) -> Result<Option<Expr>> {
+    let target = FieldRef {
+        path: target_path.to_string(),
+        field: target_field,
+    };
+    let mut ranked: Vec<Candidate> = context
+        .sources
+        .iter()
+        .filter(|source| !context.used_sources.contains(&source.path))
+        .filter_map(|source| score_list_pair(source, &target, context.options.mode))
+        .collect();
+    ranked.sort_by(|a, b| b.score.total_cmp(&a.score));
+
+    let candidate = match select_candidate(ranked, context.options) {
+        Assign::Mapped(candidate) => candidate,
+        Assign::Ambiguous(candidates) => {
+            push_ambiguous(target_path, candidates, context);
+            return Ok(None);
+        }
+        Assign::Missing => return Ok(None),
+    };
+
+    let Some(source_ref) = context
+        .sources
+        .iter()
+        .find(|source| source.path == candidate.source)
+    else {
+        return Ok(None);
+    };
+    let (Type::List { element: source_element, .. }, Type::List { element: target_element, .. }) =
+        (&source_ref.field.ty, &target_field.ty)
+    else {
+        return Ok(None);
+    };
+
+    if types_compatible(source_element, target_element) {
+        context.used_sources.push(candidate.source.clone());
+        context.explanation.push(ExplainEntry {
+            target: target_path.to_string(),
+            source: Some(candidate.source.clone()),
+            score: candidate.score,
+            reasons: candidate.reasons.clone(),
+            action: format!("map {} -> {target_path}", candidate.source),
+        });
+        return Ok(Some(Expr::Field(FieldPath::parse(&candidate.source)?)));
+    }
+
+    let (Type::Record { .. }, Type::Record { .. }) = (&**source_element, &**target_element) else {
+        return Ok(None);
+    };
+    let nested = plan_schemas(
+        &Schema::new((**source_element).clone()),
+        &Schema::new((**target_element).clone()),
+        context.options,
+    )?;
+    let PlanOutcome::Ready {
+        plan, explanation, ..
+    } = nested
+    else {
+        context.unresolved.push(Unresolved {
+            target: target_path.to_string(),
+            candidates: vec![candidate],
+        });
+        return Ok(None);
+    };
+    let Some(Operation::Map { fields }) = plan.operations.first() else {
+        return Err(Error::plan(
+            "list_map_plan",
+            "element planner must produce a map operation",
+        ));
+    };
+
+    context.used_sources.push(candidate.source.clone());
+    context.explanation.push(ExplainEntry {
+        target: target_path.to_string(),
+        source: Some(candidate.source.clone()),
+        score: candidate.score,
+        reasons: vec!["cardinality-preserving list map".into()],
+        action: format!("map elements {}[] -> {target_path}[]", candidate.source),
+    });
+    for entry in explanation {
+        context.explanation.push(ExplainEntry {
+            target: format!("{target_path}[].{}", entry.target),
+            source: entry
+                .source
+                .map(|source| format!("{}[].{source}", candidate.source)),
+            score: entry.score,
+            reasons: entry.reasons,
+            action: entry.action,
+        });
+    }
+
+    Ok(Some(Expr::ListMap {
+        input: FieldPath::parse(&candidate.source)?,
+        item: Box::new(Expr::Object(fields.clone())),
+    }))
+}
+
+fn push_ambiguous(target_path: &str, candidates: Vec<Candidate>, context: &mut BuildContext<'_>) {
+    context.unresolved.push(Unresolved {
+        target: target_path.to_string(),
+        candidates,
+    });
+    context.explanation.push(ExplainEntry {
+        target: target_path.to_string(),
+        source: None,
+        score: 0.0,
+        reasons: vec!["ambiguous".into()],
+        action: "no mapping selected".into(),
+    });
+}
+
+fn score_list_pair(
+    source: &FieldRef<'_>,
+    target: &FieldRef<'_>,
+    mode: PlannerMode,
+) -> Option<Candidate> {
+    if !matches!(source.field.ty, Type::List { .. }) || !matches!(target.field.ty, Type::List { .. }) {
+        return None;
+    }
+    score_names(source, target, mode, "list container match")
 }
 
 fn join_path(prefix: &str, field: &str) -> String {
@@ -317,7 +440,19 @@ fn score_pair(
     if !types_compatible(&source.field.ty, &target.field.ty) {
         return None;
     }
+    score_names(source, target, mode, if types_equalish(&source.field.ty, &target.field.ty) {
+        "exact type match"
+    } else {
+        "compatible type"
+    })
+}
 
+fn score_names(
+    source: &FieldRef<'_>,
+    target: &FieldRef<'_>,
+    mode: PlannerMode,
+    type_reason: &str,
+) -> Option<Candidate> {
     let mut reasons: Vec<String> = Vec::new();
     let mut score = 0.0;
     let mut direct_name_evidence = false;
@@ -357,13 +492,12 @@ fn score_pair(
         reasons.push("common-name synonym".into());
     }
 
-    if types_equalish(&source.field.ty, &target.field.ty) {
+    if type_reason == "exact type match" {
         score += 0.20;
-        reasons.push("exact type match".into());
     } else {
         score += 0.10;
-        reasons.push("compatible type".into());
     }
+    reasons.push(type_reason.into());
 
     if score <= 0.0 {
         return None;
@@ -453,24 +587,19 @@ mod tests {
             ..PlannerOptions::default()
         };
         let outcome = plan_schemas(&source, &target, &options).expect("plan");
-        let PlanOutcome::Ready {
-            plan, explanation, ..
-        } = outcome
-        else {
+        let PlanOutcome::Ready { plan, explanation, .. } = outcome else {
             panic!("expected PlanOutcome::Ready, got Ambiguous");
         };
-        let op = plan.operations.first().expect("operation");
-        let fields = match op {
-            Operation::Map { fields } => fields,
-            other => panic!("expected Map operation, got {other:?}"),
+        let Operation::Map { fields } = plan.operations.first().expect("operation") else {
+            panic!("expected Map operation");
         };
-        assert!(fields.contains_key("month"), "missing month mapping");
-        assert!(fields.contains_key("product"), "missing product mapping");
-        assert!(fields.contains_key("revenue"), "missing revenue mapping");
+        assert!(fields.contains_key("month"));
+        assert!(fields.contains_key("product"));
+        assert!(fields.contains_key("revenue"));
         let mentions = |word: &str| explanation.iter().any(|entry| entry.target == word);
-        assert!(mentions("month"), "explanation missing month");
-        assert!(mentions("product"), "explanation missing product");
-        assert!(mentions("revenue"), "explanation missing revenue");
+        assert!(mentions("month"));
+        assert!(mentions("product"));
+        assert!(mentions("revenue"));
     }
 
     #[test]
@@ -509,20 +638,12 @@ mod tests {
         )]);
         let target = Schema::record(vec![Field::new("customer_name", Type::String, false)]);
         let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
-        let PlanOutcome::Ready {
-            plan, explanation, ..
-        } = outcome
-        else {
+        let PlanOutcome::Ready { plan, explanation, .. } = outcome else {
             panic!("expected ready nested flatten plan");
         };
         assert_eq!(explanation[0].target, "customer_name");
         assert_eq!(explanation[0].source.as_deref(), Some("customer.name"));
-        assert!(
-            explanation[0]
-                .reasons
-                .iter()
-                .any(|reason| reason == "normalized-path match")
-        );
+        assert!(explanation[0].reasons.iter().any(|reason| reason == "normalized-path match"));
         let Operation::Map { fields } = &plan.operations[0] else {
             panic!("expected map operation");
         };
@@ -544,10 +665,7 @@ mod tests {
             false,
         )]);
         let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
-        let PlanOutcome::Ready {
-            plan, explanation, ..
-        } = outcome
-        else {
+        let PlanOutcome::Ready { plan, explanation, .. } = outcome else {
             panic!("expected ready nested object plan");
         };
         assert!(explanation.iter().any(|entry| {
@@ -591,5 +709,80 @@ mod tests {
         };
         assert_eq!(unresolved.len(), 1);
         assert_eq!(unresolved[0].candidates.len(), 2);
+    }
+
+    #[test]
+    fn maps_record_elements_without_changing_list_cardinality() {
+        let source = Schema::record(vec![Field::new(
+            "customers",
+            Type::list(
+                Type::record(vec![Field::new("first_name", Type::String, false)]),
+                false,
+            ),
+            false,
+        )]);
+        let target = Schema::record(vec![Field::new(
+            "customers",
+            Type::list(
+                Type::record(vec![Field::new("firstName", Type::String, false)]),
+                false,
+            ),
+            false,
+        )]);
+        let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
+        let PlanOutcome::Ready { plan, .. } = outcome else {
+            panic!("expected safe list map plan");
+        };
+        let Operation::Map { fields } = &plan.operations[0] else {
+            panic!("expected map operation");
+        };
+        assert!(matches!(fields.get("customers"), Some(Expr::ListMap { .. })));
+
+        let input = Value::object([(
+            "customers".into(),
+            Value::Array(vec![
+                Value::object([("first_name".into(), Value::String("Ada".into()))]),
+                Value::object([("first_name".into(), Value::String("Grace".into()))]),
+            ]),
+        )]);
+        let output = execute_plan(&plan, vec![input]).expect("execute list map");
+        let Value::Array(items) = output[0]
+            .as_object()
+            .expect("object")
+            .get("customers")
+            .expect("customers")
+        else {
+            panic!("expected customers array");
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0].as_object().expect("item").get("firstName"),
+            Some(&Value::String("Ada".into()))
+        );
+    }
+
+    #[test]
+    fn list_element_ambiguity_is_not_auto_resolved() {
+        let source = Schema::record(vec![Field::new(
+            "customers",
+            Type::list(
+                Type::record(vec![
+                    Field::new("customer_id", Type::String, false),
+                    Field::new("customer-id", Type::String, false),
+                ]),
+                false,
+            ),
+            false,
+        )]);
+        let target = Schema::record(vec![Field::new(
+            "customers",
+            Type::list(
+                Type::record(vec![Field::new("customerId", Type::String, false)]),
+                false,
+            ),
+            false,
+        )]);
+        let outcome = plan_schemas(&source, &target, &PlannerOptions::default()).expect("plan");
+        assert!(matches!(outcome, PlanOutcome::Ambiguous { .. }));
     }
 }
