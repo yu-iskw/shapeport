@@ -344,7 +344,8 @@ fn score_pair(
         direct_name_evidence = true;
     }
 
-    if mode == PlannerMode::Smart && !direct_name_evidence && normalized_path_match(source, target) {
+    if mode == PlannerMode::Smart && !direct_name_evidence && normalized_path_match(source, target)
+    {
         score += 0.75;
         reasons.push("normalized-path match".into());
     }
