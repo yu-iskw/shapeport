@@ -51,7 +51,7 @@ python3 -m unittest discover -s "${SCRIPT_DIR}" -p 'test_cyclomatic_gate.py'
 mkdir -p "${OUTPUT_DIR}"
 
 COVERAGE_ARGS=()
-if [[ -f "${COVERAGE_FILE}" ]]; then
+if [[ -f ${COVERAGE_FILE} ]]; then
 	echo "==> Passing coverage data: --coverage-file ${COVERAGE_FILE}"
 	COVERAGE_ARGS+=(--coverage-file "${COVERAGE_FILE}")
 else

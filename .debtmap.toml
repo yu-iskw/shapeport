@@ -35,11 +35,7 @@ detect_complexity = true
 detect_duplication = true
 
 [ignore]
-patterns = [
-    "target/**",
-    "crates/*/tests/**",
-    "*.min.js",
-]
+patterns = ["target/**", "crates/*/tests/**", "*.min.js"]
 
 [output]
 default_format = "json"

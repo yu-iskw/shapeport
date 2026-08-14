@@ -8,7 +8,7 @@ Make targets are defined in `Makefile`; scripts live in `dev/`.
 
 ## Architecture
 
-```
+```text
 Source
   |
   +--> rustfmt
@@ -52,15 +52,15 @@ The tools form complementary layers, not redundant ones. Each layer catches a di
 
 Run on every pull request and locally before committing:
 
-| Tool | What it catches |
-|---|---|
-| `rustfmt` | Formatting divergence |
-| `cargo check` | Type errors, missing traits |
-| `cargo clippy` | Correctness, style, cognitive complexity, function size |
-| `cargo-shear` | Unused `Cargo.toml` dependencies; unlinked source files |
-| `cargo-deny` | License violations, advisory vulnerabilities, banned sources |
-| `cargo-hack --each-feature` | Feature-gated compilation failures |
-| `cargo test` | Unit and integration regressions |
+| Tool                        | What it catches                                              |
+| --------------------------- | ------------------------------------------------------------ |
+| `rustfmt`                   | Formatting divergence                                        |
+| `cargo check`               | Type errors, missing traits                                  |
+| `cargo clippy`              | Correctness, style, cognitive complexity, function size      |
+| `cargo-shear`               | Unused `Cargo.toml` dependencies; unlinked source files      |
+| `cargo-deny`                | License violations, advisory vulnerabilities, banned sources |
+| `cargo-hack --each-feature` | Feature-gated compilation failures                           |
+| `cargo test`                | Unit and integration regressions                             |
 
 **Entry point:** `make lint && make test`
 
@@ -70,8 +70,8 @@ They operate on different file sets and are not duplicates.
 
 ### MAINTAINABILITY
 
-| Tool | What it catches |
-|---|---|
+| Tool    | What it catches                                    |
+| ------- | -------------------------------------------------- |
 | Debtmap | Cyclomatic complexity hotspots across the codebase |
 
 The complexity workflow runs on pull requests, but most Debtmap metrics are informational.
@@ -84,8 +84,8 @@ Coverage-aware scoring raises density because untested complexity is treated as 
 
 ### SECURITY / DATA FLOW
 
-| Tool | What it catches |
-|---|---|
+| Tool   | What it catches                                            |
+| ------ | ---------------------------------------------------------- |
 | CodeQL | Taint tracking, injection paths, unsafe data-flow patterns |
 
 CodeQL runs via GitHub code scanning.
@@ -95,9 +95,9 @@ Private repositories require the `CODEQL_ENABLED=true` secret/environment variab
 
 ### DEEP / NIGHTLY
 
-| Tool | What it catches |
-|---|---|
-| Miri | Undefined behaviour in unsafe code under a Rust interpreter |
+| Tool        | What it catches                                                 |
+| ----------- | --------------------------------------------------------------- |
+| Miri        | Undefined behaviour in unsafe code under a Rust interpreter     |
 | cargo-udeps | Unused dependencies (nightly; second opinion after cargo-shear) |
 
 These tools require a nightly Rust toolchain.
@@ -112,12 +112,12 @@ Miri only checks executed paths. OS-heavy integration tests (real sockets) are o
 
 These tools are available but not mandatory on every local edit:
 
-| Tool | Condition |
-|---|---|
+| Tool                  | Condition                                                                                                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cargo-semver-checks` | `shapeport-core` and `shapeport-mcp` are public libraries. Run on `main`/release branches or when a crates.io or git baseline exists. Not required for every local change. |
-| `cargo-llvm-cov` | Coverage reporting. Run when evaluating test coverage gaps. |
-| Kani | Not enabled. Considered for future formal verification of unsafe sections. |
-| Dylint | Not enabled. |
+| `cargo-llvm-cov`      | Coverage reporting. Run when evaluating test coverage gaps.                                                                                                                |
+| Kani                  | Not enabled. Considered for future formal verification of unsafe sections.                                                                                                 |
+| Dylint                | Not enabled.                                                                                                                                                               |
 
 **Entry point:** `make semver-checks`, `make coverage`
 
@@ -149,24 +149,24 @@ make clean              # remove build artifacts
 
 ### Clippy (`clippy.toml`) — stable, mandatory gate
 
-| Setting | Value |
-|---|---|
-| `cognitive-complexity-threshold` | `10` |
-| `too-many-arguments-threshold` | `6` |
-| `too-many-lines-threshold` | `100` |
-| `type-complexity-threshold` | `250` |
+| Setting                          | Value |
+| -------------------------------- | ----- |
+| `cognitive-complexity-threshold` | `10`  |
+| `too-many-arguments-threshold`   | `6`   |
+| `too-many-lines-threshold`       | `100` |
+| `type-complexity-threshold`      | `250` |
 
 Clippy is the fast, authoritative per-function gate. Violations block CI.
 
 ### Debtmap — cyclomatic complexity interpretation
 
-| Range | Signal |
-|---|---|
-| 1–5 | Simple — no action needed |
-| 6–10 | Moderate — acceptable with clear logic |
-| 11–15 | Investigate — consider splitting |
-| 16–20 | Strong refactoring signal |
-| > 20 | CI failure unless the complexity is explicitly justified and documented |
+| Range | Signal                                                               |
+| ----- | -------------------------------------------------------------------- |
+| 1–5   | Simple — no action needed                                            |
+| 6–10  | Moderate — acceptable with clear logic                               |
+| 11–15 | Investigate — consider splitting                                     |
+| 16–20 | Strong refactoring signal                                            |
+| > 20  | CI failure (function-level; file-scope aggregates are informational) |
 
 Prefer function-level thresholds. Do not suppress a complexity violation without documenting why the complexity is inherent to the algorithm.
 
@@ -174,20 +174,20 @@ Prefer function-level thresholds. Do not suppress a complexity violation without
 
 ## Stable vs Nightly Toolchain
 
-| Category | Stable | Nightly |
-|---|---|---|
-| Formatting | rustfmt | — |
-| Type checking | cargo check | — |
-| Linting | cargo clippy | — |
-| Unused deps (fast) | cargo-shear | — |
-| Dependency policy | cargo-deny | — |
-| Feature gating | cargo-hack | — |
-| Testing | cargo test | — |
-| Coverage | cargo-llvm-cov | — |
-| Complexity | Debtmap | — |
-| Semver | cargo-semver-checks | — |
-| UB detection | — | Miri |
-| Unused deps (deep) | — | cargo-udeps |
+| Category           | Stable              | Nightly     |
+| ------------------ | ------------------- | ----------- |
+| Formatting         | rustfmt             | —           |
+| Type checking      | cargo check         | —           |
+| Linting            | cargo clippy        | —           |
+| Unused deps (fast) | cargo-shear         | —           |
+| Dependency policy  | cargo-deny          | —           |
+| Feature gating     | cargo-hack          | —           |
+| Testing            | cargo test          | —           |
+| Coverage           | cargo-llvm-cov      | —           |
+| Complexity         | Debtmap             | —           |
+| Semver             | cargo-semver-checks | —           |
+| UB detection       | —                   | Miri        |
+| Unused deps (deep) | —                   | cargo-udeps |
 
 `setup.sh` installs stable tools only. Nightly tools require an explicit `rustup toolchain install nightly` step.
 
@@ -226,13 +226,13 @@ This repo currently has no optional crate features, but `--each-feature` still r
 
 Controlled by `deny.toml`. Key rules:
 
-| Rule | Policy |
-|---|---|
-| License allowlist | Defined in `deny.toml`; add new licenses there with a rationale comment |
-| Advisory ignores | Must include a reason and a tracking issue reference |
-| Sources | `crates.io` only by default; git dependencies are denied unless explicitly allowed |
-| Wildcards | Denied — all version constraints must be explicit |
-| Duplicate versions | Warn; resolve when practical |
+| Rule               | Policy                                                                             |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| License allowlist  | Defined in `deny.toml`; add new licenses there with a rationale comment            |
+| Advisory ignores   | Must include a reason and a tracking issue reference                               |
+| Sources            | `crates.io` only by default; git dependencies are denied unless explicitly allowed |
+| Wildcards          | Denied — all version constraints must be explicit                                  |
+| Duplicate versions | Warn; resolve when practical                                                       |
 
 To change a policy: edit `deny.toml`, add a comment explaining the reason, and run `make lint` to verify.
 

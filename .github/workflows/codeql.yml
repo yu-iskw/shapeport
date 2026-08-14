@@ -63,11 +63,9 @@ jobs:
         uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           languages: rust
-          build-mode: manual
+          # Rust's extractor does not support manual/autobuild; it uses rust-analyzer.
+          build-mode: none
           queries: security-and-quality
-
-      - name: Build workspace
-        run: cargo build --workspace --all-features
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7

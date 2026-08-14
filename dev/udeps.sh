@@ -24,6 +24,8 @@ cd "${MODULE_DIR}"
 # shellcheck source=lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
+# udeps needs nightly but no extra rustup components.
+# shellcheck disable=SC2119
 require_nightly
 install_cargo_tool cargo-udeps cargo-udeps
 

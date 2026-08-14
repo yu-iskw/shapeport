@@ -27,10 +27,10 @@ MODULE_DIR="$(dirname "${SCRIPT_DIR}")"
 cd "${MODULE_DIR}"
 
 if ! command -v cargo-llvm-cov &>/dev/null; then
-  echo "ERROR: cargo-llvm-cov is not installed."
-  echo "  Run 'make setup' to install optional tools, or:"
-  echo "  cargo install cargo-llvm-cov --locked"
-  exit 1
+	echo "ERROR: cargo-llvm-cov is not installed."
+	echo "  Run 'make setup' to install optional tools, or:"
+	echo "  cargo install cargo-llvm-cov --locked"
+	exit 1
 fi
 
 OUTPUT="coverage.lcov"

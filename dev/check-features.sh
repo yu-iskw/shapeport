@@ -26,8 +26,8 @@ MODULE_DIR="$(dirname "${SCRIPT_DIR}")"
 cd "${MODULE_DIR}"
 
 if ! command -v cargo-hack &>/dev/null; then
-  echo "ERROR: cargo-hack is not installed. Run 'make setup' to install required tools."
-  exit 1
+	echo "ERROR: cargo-hack is not installed. Run 'make setup' to install required tools."
+	exit 1
 fi
 
 echo "==> Running cargo hack clippy (each-feature) ..."

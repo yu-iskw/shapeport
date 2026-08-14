@@ -43,38 +43,15 @@ _nightly_install_hint() {
 	fi
 }
 
-# Collect `--component NAME` values into the nameref array given as $1.
-_nightly_components_from_args() {
-	local -n _components=$1
-	shift
-	_components=()
-	local expecting_component=false
-	local arg
-	for arg in "$@"; do
-		if [[ "${expecting_component}" == "true" ]]; then
-			_components+=("${arg}")
-			expecting_component=false
-		elif [[ "${arg}" == "--component" ]]; then
-			expecting_component=true
-		else
-			echo "ERROR: require_nightly: unsupported argument: ${arg}" >&2
-			exit 1
-		fi
-	done
-	if [[ "${expecting_component}" == "true" ]]; then
-		echo "ERROR: require_nightly: --component requires a name" >&2
-		exit 1
-	fi
-}
-
 # Add any requested nightly components that are not already installed.
 _ensure_nightly_components() {
-	local -n _components=$1
-	[[ ${#_components[@]} -eq 0 ]] && return 0
+	if [[ $# -eq 0 ]]; then
+		return 0
+	fi
 	local installed
 	installed="$(rustup component list --toolchain nightly 2>/dev/null || true)"
 	local component
-	for component in "${_components[@]}"; do
+	for component in "$@"; do
 		if grep -q "${component}.*installed" <<<"${installed}"; then
 			continue
 		fi
@@ -88,14 +65,32 @@ _ensure_nightly_components() {
 # re-running `rustup toolchain install` (which would hit the network).
 require_nightly() {
 	local components=()
-	_nightly_components_from_args components "$@"
+	local expecting_component=false
+	local arg
+	for arg in "$@"; do
+		if [[ ${expecting_component} == "true" ]]; then
+			components+=("${arg}")
+			expecting_component=false
+		elif [[ ${arg} == "--component" ]]; then
+			expecting_component=true
+		else
+			echo "ERROR: require_nightly: unsupported argument: ${arg}" >&2
+			exit 1
+		fi
+	done
+	if [[ ${expecting_component} == "true" ]]; then
+		echo "ERROR: require_nightly: --component requires a name" >&2
+		exit 1
+	fi
 
-	if rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
-		_ensure_nightly_components components
+	local toolchains
+	toolchains="$(rustup toolchain list 2>/dev/null || true)"
+	if grep -q '^nightly' <<<"${toolchains}"; then
+		_ensure_nightly_components "${components[@]}"
 		return 0
 	fi
 
-	if [[ "${INSTALL_NIGHTLY:-}" != "1" ]]; then
+	if [[ ${INSTALL_NIGHTLY-} != "1" ]]; then
 		echo ""
 		echo "ERROR: nightly Rust toolchain is not installed and INSTALL_NIGHTLY is not set."
 		echo ""

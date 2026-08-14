@@ -26,9 +26,9 @@ cd "${MODULE_DIR}"
 source "${SCRIPT_DIR}/lib.sh"
 
 if ! command -v cargo &>/dev/null; then
-  echo "Error: cargo is not installed."
-  echo "Install Rust from https://rustup.rs/ and rerun make setup."
-  exit 1
+	echo "Error: cargo is not installed."
+	echo "Install Rust from https://rustup.rs/ and rerun make setup."
+	exit 1
 fi
 
 echo "==> Fetching workspace dependencies..."
@@ -39,18 +39,25 @@ cargo fetch
 # ---------------------------------------------------------------------------
 echo ""
 echo "==> Installing required tools..."
-install_cargo_tool cargo-hack       cargo-hack
-install_cargo_tool cargo-shear      cargo-shear
-install_cargo_tool cargo-deny       cargo-deny
-install_cargo_tool debtmap          debtmap
+install_cargo_tool cargo-hack cargo-hack
+install_cargo_tool cargo-shear cargo-shear
+install_cargo_tool cargo-deny cargo-deny
+install_cargo_tool debtmap debtmap
 
 # ---------------------------------------------------------------------------
 # Step 3: optional tools
 # ---------------------------------------------------------------------------
 echo ""
 echo "==> Installing optional tools (skipped gracefully if unavailable)..."
-install_cargo_tool cargo-llvm-cov   cargo-llvm-cov   || echo "  [warn]    cargo-llvm-cov install failed; coverage target will not work"
-install_cargo_tool cargo-semver-checks cargo-semver-checks || echo "  [warn]    cargo-semver-checks install failed; semver-checks target will not work"
+# install_cargo_tool is a boolean-style helper here; failure is warned, not fatal.
+# shellcheck disable=SC2310
+if ! install_cargo_tool cargo-llvm-cov cargo-llvm-cov; then
+	echo "  [warn]    cargo-llvm-cov install failed; coverage target will not work"
+fi
+# shellcheck disable=SC2310
+if ! install_cargo_tool cargo-semver-checks cargo-semver-checks; then
+	echo "  [warn]    cargo-semver-checks install failed; semver-checks target will not work"
+fi
 
 # ---------------------------------------------------------------------------
 # Summary
@@ -60,20 +67,20 @@ echo "==> Setup complete."
 echo ""
 echo "  Required tools (needed by make lint, make check-features, make analyze-complexity):"
 for t in cargo-hack cargo-shear cargo-deny debtmap; do
-  if command -v "${t}" &>/dev/null; then
-    echo "    [ok] ${t}"
-  else
-    echo "    [MISSING] ${t}  <-- run make setup again or install manually"
-  fi
+	if command -v "${t}" &>/dev/null; then
+		echo "    [ok] ${t}"
+	else
+		echo "    [MISSING] ${t}  <-- run make setup again or install manually"
+	fi
 done
 echo ""
 echo "  Optional tools:"
 for t in cargo-llvm-cov cargo-semver-checks; do
-  if command -v "${t}" &>/dev/null; then
-    echo "    [ok] ${t}"
-  else
-    echo "    [missing] ${t}  (non-blocking)"
-  fi
+	if command -v "${t}" &>/dev/null; then
+		echo "    [ok] ${t}"
+	else
+		echo "    [missing] ${t}  (non-blocking)"
+	fi
 done
 echo ""
 echo "  NOTE: nightly Rust (miri, cargo-udeps) is NOT installed by default."

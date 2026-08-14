@@ -27,11 +27,11 @@ cd "${MODULE_DIR}"
 # 1. Trunk (non-Rust linters): optional — skip gracefully when not on PATH
 # ---------------------------------------------------------------------------
 if command -v trunk &>/dev/null; then
-  echo "==> Running trunk check -a ..."
-  trunk check -a
+	echo "==> Running trunk check -a ..."
+	trunk check -a
 else
-  echo "==> trunk not found on PATH; skipping non-Rust linters (Trunk)."
-  echo "    Install Trunk from https://trunk.io to enable full repo linting."
+	echo "==> trunk not found on PATH; skipping non-Rust linters (Trunk)."
+	echo "    Install Trunk from https://trunk.io to enable full repo linting."
 fi
 
 # ---------------------------------------------------------------------------
@@ -50,9 +50,9 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 # 4. cargo-shear: detect unused dependencies
 # ---------------------------------------------------------------------------
 if ! command -v cargo-shear &>/dev/null; then
-  echo ""
-  echo "ERROR: cargo-shear is not installed. Run 'make setup' to install required tools."
-  exit 1
+	echo ""
+	echo "ERROR: cargo-shear is not installed. Run 'make setup' to install required tools."
+	exit 1
 fi
 echo "==> Running cargo shear ..."
 cargo shear --deny-warnings
@@ -61,9 +61,9 @@ cargo shear --deny-warnings
 # 5. cargo-deny: license / advisory / duplicate checks
 # ---------------------------------------------------------------------------
 if ! command -v cargo-deny &>/dev/null; then
-  echo ""
-  echo "ERROR: cargo-deny is not installed. Run 'make setup' to install required tools."
-  exit 1
+	echo ""
+	echo "ERROR: cargo-deny is not installed. Run 'make setup' to install required tools."
+	exit 1
 fi
 echo "==> Running cargo deny check ..."
 cargo deny check

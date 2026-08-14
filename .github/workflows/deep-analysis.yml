@@ -3,7 +3,7 @@ name: Deep Analysis
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 4 * * 1'
+    - cron: 17 4 * * 1
   push:
     branches:
       - main
@@ -47,7 +47,7 @@ jobs:
       - name: Run Miri
         env:
           INSTALL_NIGHTLY: "1"
-          MIRIFLAGS: "-Zmiri-disable-isolation"
+          MIRIFLAGS: -Zmiri-disable-isolation
         run: bash ./dev/miri.sh
 
   udeps:
