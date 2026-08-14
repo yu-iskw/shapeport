@@ -1,0 +1,387 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shapeport.dev/schemas/transformation-plan.v1alpha1.json",
+  "title": "TransformationPlan",
+  "description": "ShapePort Transformation Plan IR (shapeport.dev/v1alpha1). An ordered list of operations applied row-by-row to transform source records into target records.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "operations"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "shapeport.dev/v1alpha1",
+      "description": "Must be 'shapeport.dev/v1alpha1'."
+    },
+    "kind": {
+      "type": "string",
+      "const": "TransformationPlan",
+      "description": "Must be 'TransformationPlan'."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Arbitrary key-value metadata (source fingerprint, planner version, etc.).",
+      "additionalProperties": true
+    },
+    "validation": {
+      "type": "object",
+      "description": "Plan-level validation configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "output": {
+          "type": "string",
+          "enum": ["strict", "lenient", "none"],
+          "default": "strict"
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "description": "Execution-time settings.",
+      "additionalProperties": false,
+      "properties": {
+        "errorPolicy": {
+          "type": "string",
+          "enum": ["fail", "skip", "collect"],
+          "default": "fail"
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "description": "Ordered sequence of transformation operations applied to each row.",
+      "items": {
+        "$ref": "#/$defs/Operation"
+      }
+    }
+  },
+  "$defs": {
+    "FieldPath": {
+      "type": "string",
+      "description": "Dot-separated field path (e.g. 'address.city').",
+      "examples": ["id", "address.city", "line_items.0.sku"]
+    },
+    "CastPolicy": {
+      "type": "string",
+      "enum": ["strict", "lossy", "try"],
+      "description": "How to handle cast failures: strict = error, lossy = best-effort, try = null on failure."
+    },
+    "Expr": {
+      "description": "Value expression used in Coalesce, Object, Map, and Filter operations.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Field reference expression.",
+          "required": ["field"],
+          "additionalProperties": false,
+          "properties": {
+            "field": { "$ref": "#/$defs/FieldPath" }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Literal value expression.",
+          "required": ["literal"],
+          "additionalProperties": false,
+          "properties": {
+            "literal": {}
+          }
+        },
+        {
+          "type": "object",
+          "description": "Cast expression.",
+          "required": ["cast"],
+          "additionalProperties": false,
+          "properties": {
+            "cast": {
+              "type": "object",
+              "required": ["expr", "target", "policy"],
+              "additionalProperties": false,
+              "properties": {
+                "expr": { "$ref": "#/$defs/Expr" },
+                "target": { "type": "string" },
+                "policy": { "$ref": "#/$defs/CastPolicy" }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Coalesce expression — returns first non-null.",
+          "required": ["coalesce"],
+          "additionalProperties": false,
+          "properties": {
+            "coalesce": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Expr" },
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Function call expression.",
+          "required": ["call"],
+          "additionalProperties": false,
+          "properties": {
+            "call": {
+              "type": "object",
+              "required": ["function", "args"],
+              "additionalProperties": false,
+              "properties": {
+                "function": { "type": "string" },
+                "args": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/Expr" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Object construction expression.",
+          "required": ["object"],
+          "additionalProperties": false,
+          "properties": {
+            "object": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/Expr" }
+            }
+          }
+        }
+      ]
+    },
+    "Operation": {
+      "description": "One of the 11 supported transformation operations.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Project: retain only the listed fields (in order).",
+          "required": ["project"],
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": "object",
+              "required": ["fields"],
+              "additionalProperties": false,
+              "properties": {
+                "fields": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/FieldPath" },
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Rename: rename fields using a source→target mapping.",
+          "required": ["rename"],
+          "additionalProperties": false,
+          "properties": {
+            "rename": {
+              "type": "object",
+              "required": ["mapping"],
+              "additionalProperties": false,
+              "properties": {
+                "mapping": {
+                  "type": "object",
+                  "description": "Keys are source field paths, values are target field names.",
+                  "additionalProperties": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Drop: remove the listed fields.",
+          "required": ["drop"],
+          "additionalProperties": false,
+          "properties": {
+            "drop": {
+              "type": "object",
+              "required": ["fields"],
+              "additionalProperties": false,
+              "properties": {
+                "fields": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/FieldPath" },
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Literal: add a field with a constant value.",
+          "required": ["literal"],
+          "additionalProperties": false,
+          "properties": {
+            "literal": {
+              "type": "object",
+              "required": ["field", "value"],
+              "additionalProperties": false,
+              "properties": {
+                "field": { "type": "string" },
+                "value": {}
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Cast: coerce a field to a target type.",
+          "required": ["cast"],
+          "additionalProperties": false,
+          "properties": {
+            "cast": {
+              "type": "object",
+              "required": ["field", "target", "policy"],
+              "additionalProperties": false,
+              "properties": {
+                "field": { "$ref": "#/$defs/FieldPath" },
+                "target": { "type": "string" },
+                "policy": { "$ref": "#/$defs/CastPolicy" }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Coalesce: set a field to the first non-null expression result.",
+          "required": ["coalesce"],
+          "additionalProperties": false,
+          "properties": {
+            "coalesce": {
+              "type": "object",
+              "required": ["field", "values"],
+              "additionalProperties": false,
+              "properties": {
+                "field": { "type": "string" },
+                "values": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/Expr" },
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Object: construct or replace the record using named expressions.",
+          "required": ["object"],
+          "additionalProperties": false,
+          "properties": {
+            "object": {
+              "type": "object",
+              "required": ["fields"],
+              "additionalProperties": false,
+              "properties": {
+                "fields": {
+                  "type": "object",
+                  "additionalProperties": { "$ref": "#/$defs/Expr" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Map: add or overwrite fields using expressions (non-destructive).",
+          "required": ["map"],
+          "additionalProperties": false,
+          "properties": {
+            "map": {
+              "type": "object",
+              "required": ["fields"],
+              "additionalProperties": false,
+              "properties": {
+                "fields": {
+                  "type": "object",
+                  "additionalProperties": { "$ref": "#/$defs/Expr" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Filter: retain only rows where the predicate evaluates to true.",
+          "required": ["filter"],
+          "additionalProperties": false,
+          "properties": {
+            "filter": {
+              "type": "object",
+              "required": ["predicate"],
+              "additionalProperties": false,
+              "properties": {
+                "predicate": { "$ref": "#/$defs/Expr" }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Sort: sort the row stream by the specified keys.",
+          "required": ["sort"],
+          "additionalProperties": false,
+          "properties": {
+            "sort": {
+              "type": "object",
+              "required": ["keys"],
+              "additionalProperties": false,
+              "properties": {
+                "keys": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "required": ["field"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "field": { "$ref": "#/$defs/FieldPath" },
+                      "order": {
+                        "type": "string",
+                        "enum": ["asc", "desc"],
+                        "default": "asc"
+                      },
+                      "nulls": {
+                        "type": "string",
+                        "enum": ["first", "last"],
+                        "default": "last"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Explode: flatten an array field into one row per element.",
+          "required": ["explode"],
+          "additionalProperties": false,
+          "properties": {
+            "explode": {
+              "type": "object",
+              "required": ["field"],
+              "additionalProperties": false,
+              "properties": {
+                "field": { "$ref": "#/$defs/FieldPath" },
+                "to": {
+                  "type": "string",
+                  "description": "Optional output field name; defaults to the source field name."
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

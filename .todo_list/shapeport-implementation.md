@@ -1,0 +1,26 @@
+# ShapePort implementation
+
+- [x] Adversarially review RFC and lock revisions (MCP v2, IR, security)
+- [x] Write revised RFC, ADRs, and implementation plan
+- [x] Rename workspace, create crates, pin rmcp 3.x / MCP 2026-07-28
+- [x] Implement schema, value, path, fingerprint, diagnostics
+- [x] Implement Transformation Plan IR, typecheck, functions
+- [x] Implement JSON/JSONL/YAML/CSV/TSV/Parquet adapters
+- [x] Implement planner, document executor, query engine
+- [x] Implement app services and shapeport CLI
+- [x] Implement MCP v2 stdio + Streamable HTTP server
+- [x] Lint (`cargo clippy --workspace --all-targets --all-features -- -D warnings`)
+- [x] Test (`cargo test --workspace --all-features`)
+- [x] Introduce PlanCmd/TransformCmd structs to fix too-many-arguments clippy
+- [x] Load --config YAML and apply mcp.allowedOrigins / bearerToken
+- [x] Apply SHAPEPORT_MCP_ORIGIN_ALLOWLIST env var
+- [x] Create fixtures/flint/{input,target.schema,expected}.json
+- [x] Create fixtures/csv/people.csv
+- [x] Create crates/shapeport-core/tests/rfc_acceptance.rs integration tests
+- [x] Create crates/shapeport-mcp/tests/http_security.rs and add tokio dev-dep
+- [x] Rewrite README.md for ShapePort (crate layout, MCP, CLI, security, Flint example)
+- [x] Update CLAUDE.md and AGENTS.md for ShapePort crates
+- [x] Create ADR 0002: VM only, no DataFusion
+- [x] Create ADR 0003: MCP 2026-07-28 via rmcp 3.x
+- [x] Create ADR 0004: FieldPath-only plan IR
+- [x] Write docs/schemas/transformation-plan.v1alpha1.json JSON Schema 2020-12

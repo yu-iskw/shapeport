@@ -1,0 +1,28 @@
+[package]
+name = "shapeport-cli"
+version.workspace = true
+description = "ShapePort CLI for schema-driven data transformation and MCP serving."
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["cli", "mcp", "transform", "schema"]
+categories = ["command-line-utilities"]
+rust-version.workspace = true
+
+[dependencies]
+clap.workspace = true
+serde_json.workspace = true
+serde_norway.workspace = true
+shapeport-core = { path = "../shapeport-core", version = "0.1.0" }
+shapeport-mcp = { path = "../shapeport-mcp", version = "0.1.0" }
+tokio.workspace = true
+tracing-subscriber.workspace = true
+
+[[bin]]
+name = "shapeport"
+path = "src/main.rs"
+
+[lints]
+workspace = true

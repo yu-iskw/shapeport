@@ -1,0 +1,10 @@
+{
+  "root": {
+    "kind": "record",
+    "fields": [
+      { "name": "month", "type": { "kind": "string" }, "nullable": false },
+      { "name": "product", "type": { "kind": "string" }, "nullable": false },
+      { "name": "revenue", "type": { "kind": "string" }, "nullable": false }
+    ]
+  }
+}

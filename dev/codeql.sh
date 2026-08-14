@@ -40,10 +40,11 @@ if [[ -d ${DB_DIR} ]]; then
 fi
 
 echo "Creating CodeQL database..."
+# Rust's extractor does not support a traced build command; use build-mode none.
 codeql database create "${DB_DIR}" \
 	--language=rust \
 	--source-root . \
-	--command="cargo build --workspace --all-features"
+	--build-mode=none
 
 # Run Analysis
 # We use the same 'security-and-quality' suite as defined in CI.
