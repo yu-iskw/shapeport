@@ -43,7 +43,7 @@ SHAPEPORT_CONFORMANCE_JSON=target/conformance.json make conformance
 
 ## Fixture format
 
-Fixtures live under `tests/conformance/mapping/`. Each YAML file contains a versioned collection of declarative cases. The format deliberately describes public planner behavior rather than serializing planner-internal Rust types.
+Fixtures live under `tests/conformance/mapping/`. YAML files contain versioned collections of declarative cases. The harness loads the corpus groups together. The format deliberately describes public planner behavior rather than serializing planner-internal Rust types.
 
 ```yaml
 version: 1
@@ -87,11 +87,25 @@ Supported expectations are:
 
 ## Scenario families
 
-The initial corpus covers exact names, normalized naming conventions, aliases, type incompatibility, nullability, missing required fields, ambiguous mappings, adversarial collisions, arrays, object construction, schema evolution, and real integration-shaped Flint, MCP, and warehouse contracts.
+The initial corpus covers:
 
-Cases that exercise capabilities not yet implemented should encode the safe current behavior, normally `ambiguous`, rather than fabricate a successful transformation. When a follow-up feature adds structural planning such as nested object construction or array explosion, update the fixture in the same change that implements the behavior.
+- exact and normalized names;
+- aliases and schema-evolution renames;
+- compatible and incompatible type behavior;
+- decimal preservation;
+- timestamp preservation;
+- nullability and missing required fields;
+- default-bearing fields;
+- enum-domain preservation;
+- arrays;
+- flattening safety;
+- nested object construction safety;
+- ambiguous mappings and adversarial collisions;
+- real integration-shaped Flint, MCP, and warehouse contracts.
 
-The corpus should expand to dedicated cases for defaults, enum-domain conversion, timestamp parsing, flattening, aggregation, and other plan operations as those semantics become planner-visible. Execution-level fixtures can additionally carry input and expected output once the planner synthesizes the required operation.
+The purpose of a family is to pin safe planner behavior even when synthesis for that operation does not exist yet. For example, the flattening and nested-construction fixtures currently require ambiguity instead of allowing a plausible structural guess. Likewise, the default fixture verifies safe omission of an optional default-bearing target; it does not claim that the planner synthesizes literal defaults yet.
+
+When a follow-up capability adds structural planning such as nested object construction, flattening, enum-domain conversion, timestamp parsing, defaults, or array explosion, update the relevant fixture in the same change that implements the behavior. Execution-level fixtures can additionally carry input and expected output once the planner synthesizes the required operation.
 
 ## Metrics
 
