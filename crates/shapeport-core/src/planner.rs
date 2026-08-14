@@ -389,7 +389,12 @@ fn score_list_pair(
     {
         return None;
     }
-    score_names(source, target, mode, "list container match")
+    let type_reason = if source.field.ty == target.field.ty {
+        "exact type match"
+    } else {
+        "list container match"
+    };
+    score_names(source, target, mode, type_reason)
 }
 
 fn join_path(prefix: &str, field: &str) -> String {
