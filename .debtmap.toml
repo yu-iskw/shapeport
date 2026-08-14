@@ -1,0 +1,37 @@
+# Debtmap is the richer maintainability layer.
+# Clippy cognitive complexity (threshold 10) remains the fast mandatory gate.
+#
+# Cyclomatic interpretation used by this repository:
+#   1-5    simple
+#   6-10   moderate
+#   11-15  investigate
+#   16-20  strong refactoring signal
+#   >20    CI failure unless explicitly justified
+#
+# `debtmap validate` uses density as its official blocking metric.
+# Function-level cyclomatic > 20 is enforced by `dev/analyze-complexity.sh`.
+
+[thresholds]
+complexity = 20
+duplication = 40
+
+[thresholds.validation]
+# Conservative starting gates for an existing codebase. Tighten over time.
+max_average_complexity = 15.0
+max_debt_density = 80.0
+max_codebase_risk_score = 9.0
+min_coverage_percentage = 0.0
+max_total_debt_score = 10000
+
+[tiers]
+critical = 9.0
+high = 7.0
+medium = 5.0
+
+[ignore]
+# Integration-test crates and generated output. In-source `#[cfg(test)]`
+# modules remain visible so production/test complexity can be compared.
+patterns = [
+    "**/target/**",
+    "**/crates/*/tests/**",
+]

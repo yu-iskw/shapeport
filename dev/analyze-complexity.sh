@@ -17,11 +17,12 @@ set -Eeuo pipefail
 
 # Maintainability / complexity analysis using Debtmap.
 #
-# Hard gate: any function with cyclomatic complexity > 20 fails the build,
-# unless a justification file (complexity-justifications.txt) exists at the
-# repo root.
-#
-# JSON output is written to target/debtmap.json for CI artifact archiving.
+# Clippy cognitive complexity (threshold 10) is the fast mandatory gate.
+# This script is the richer maintainability layer:
+#   - JSON artifact for CI
+#   - human-readable hotspot listing
+#   - debtmap validate (density-based)
+#   - function-level cyclomatic > 20 hard fail unless justified
 
 SCRIPT_FILE="$(readlink -f "$0")"
 SCRIPT_DIR="$(dirname "${SCRIPT_FILE}")"
@@ -36,142 +37,141 @@ OUTPUT_JSON="${OUTPUT_DIR}/debtmap.json"
 COVERAGE_FILE="${MODULE_DIR}/coverage.lcov"
 
 if ! command -v debtmap &>/dev/null; then
-  echo "ERROR: debtmap is not installed. Run 'make setup' to install required tools."
-  exit 1
+	echo "ERROR: debtmap is not installed. Run 'make setup' to install required tools."
+	exit 1
+fi
+
+if ! command -v python3 &>/dev/null; then
+	echo "ERROR: python3 is required to evaluate Debtmap JSON against the cyclomatic gate."
+	exit 1
 fi
 
 mkdir -p "${OUTPUT_DIR}"
 
-# ---------------------------------------------------------------------------
-# Build the base analyze command, probing for supported flags
-# ---------------------------------------------------------------------------
-ANALYZE_HELP="$(debtmap analyze --help 2>&1 || true)"
-
-ANALYZE_ARGS=(analyze . --languages rust)
-
-# JSON output flag
-if echo "${ANALYZE_HELP}" | grep -q -- '--format'; then
-  ANALYZE_ARGS+=(--format json)
-fi
-
-# Output file flag
-if echo "${ANALYZE_HELP}" | grep -q -- '--output'; then
-  ANALYZE_ARGS+=(-o "${OUTPUT_JSON}")
-elif echo "${ANALYZE_HELP}" | grep -q -- '-o '; then
-  ANALYZE_ARGS+=(-o "${OUTPUT_JSON}")
-fi
-
-# Top-N hotspots flag
-if echo "${ANALYZE_HELP}" | grep -q -- '--top'; then
-  ANALYZE_ARGS+=(--top 20)
-fi
-
-# Complexity threshold flag (hard gate via native flag if available)
-NATIVE_THRESHOLD=false
-if echo "${ANALYZE_HELP}" | grep -q -- '--threshold-complexity'; then
-  ANALYZE_ARGS+=(--threshold-complexity "${COMPLEXITY_THRESHOLD}")
-  NATIVE_THRESHOLD=true
-fi
-
-# Coverage integration
+COVERAGE_ARGS=()
 if [[ -f "${COVERAGE_FILE}" ]]; then
-  if echo "${ANALYZE_HELP}" | grep -q -- '--lcov'; then
-    echo "==> Passing coverage data: --lcov ${COVERAGE_FILE}"
-    ANALYZE_ARGS+=(--lcov "${COVERAGE_FILE}")
-  elif echo "${ANALYZE_HELP}" | grep -q -- '--coverage-file'; then
-    echo "==> Passing coverage data: --coverage-file ${COVERAGE_FILE}"
-    ANALYZE_ARGS+=(--coverage-file "${COVERAGE_FILE}")
-  else
-    echo "    (coverage.lcov found but debtmap analyze does not expose a known coverage flag; skipping)"
-  fi
+	echo "==> Passing coverage data: --coverage-file ${COVERAGE_FILE}"
+	COVERAGE_ARGS+=(--coverage-file "${COVERAGE_FILE}")
 else
-  echo "    (no coverage.lcov found; run 'make coverage' first to enable coverage-aware analysis)"
+	echo "    (no coverage.lcov found; run 'make coverage' first to enable coverage-aware analysis)"
 fi
 
-# ---------------------------------------------------------------------------
-# Run analysis
-# ---------------------------------------------------------------------------
-echo "==> Running: debtmap ${ANALYZE_ARGS[*]}"
-debtmap "${ANALYZE_ARGS[@]}"
+# Full JSON for gating. Do not pass --top here: that truncates the artifact.
+# --threshold-complexity only filters reporting; it does not fail the process.
+echo "==> Writing Debtmap JSON to ${OUTPUT_JSON}"
+debtmap analyze . --languages rust --format json --output "${OUTPUT_JSON}" "${COVERAGE_ARGS[@]}"
 
-# ---------------------------------------------------------------------------
-# Validate (staged CI; debt density is the official blocking metric)
-# ---------------------------------------------------------------------------
-VALIDATE_HELP="$(debtmap validate --help 2>&1 || true)"
-if echo "${VALIDATE_HELP}" | grep -qv 'unknown subcommand\|error:'; then
-  echo ""
-  echo "==> Running: debtmap validate ."
-  debtmap validate .
-else
-  echo "    (debtmap validate subcommand not available; skipping)"
-fi
+echo ""
+echo "==> Highest-complexity functions (top 20):"
+debtmap analyze . --languages rust --top 20 "${COVERAGE_ARGS[@]}" || true
 
-# ---------------------------------------------------------------------------
-# Hard gate: cyclomatic complexity > COMPLEXITY_THRESHOLD
-# ---------------------------------------------------------------------------
+echo ""
+echo "==> Running: debtmap validate ."
+debtmap validate . "${COVERAGE_ARGS[@]}"
+
 echo ""
 echo "==> Applying cyclomatic complexity hard gate (threshold: ${COMPLEXITY_THRESHOLD}) ..."
 
-if [[ "${NATIVE_THRESHOLD}" == "true" ]]; then
-  # debtmap already enforced the threshold via --threshold-complexity above;
-  # if we reached this point the check passed.
-  echo "    Gate enforced natively by debtmap --threshold-complexity."
-elif [[ -f "${OUTPUT_JSON}" ]]; then
-  # Attempt to parse the JSON for cyclomatic / complexity fields.
-  # We use a conservative approach: fail only when we can confirm a violation.
-  VIOLATING_COUNT=0
-  if command -v python3 &>/dev/null; then
-    VIOLATING_COUNT="$(python3 - "${OUTPUT_JSON}" "${COMPLEXITY_THRESHOLD}" <<'PYEOF'
-import json, sys
+if [[ ! -f "${OUTPUT_JSON}" ]]; then
+	echo "ERROR: ${OUTPUT_JSON} was not produced; cannot enforce the cyclomatic gate."
+	exit 1
+fi
+
+set +e
+GATE_OUTPUT="$(python3 - "${OUTPUT_JSON}" "${COMPLEXITY_THRESHOLD}" <<'PYEOF'
+import json
+import sys
 
 path, threshold = sys.argv[1], int(sys.argv[2])
 try:
-    data = json.load(open(path))
-except Exception:
-    # If we cannot parse the file, exit 0 — we will not fake a pass or fail
-    sys.exit(0)
+    data = json.load(open(path, encoding="utf-8"))
+except Exception as exc:
+    print(f"ERROR: failed to parse {path}: {exc}", file=sys.stderr)
+    sys.exit(2)
 
-# Walk common schema shapes
+CYCLO_KEYS = (
+    "cyclomatic",
+    "cyclomatic_complexity",
+    "cyclo",
+    "cyclomatic_complexity_value",
+)
+
 def iter_items(node):
     if isinstance(node, list):
         for item in node:
             yield from iter_items(item)
     elif isinstance(node, dict):
         yield node
-        for v in node.values():
-            yield from iter_items(v)
+        for value in node.values():
+            yield from iter_items(value)
 
-count = 0
+seen = set()
+violations = []
 for item in iter_items(data):
-    for key in ("cyclomatic", "cyclomatic_complexity", "complexity"):
-        val = item.get(key)
-        if isinstance(val, (int, float)) and val > threshold:
-            name = item.get("name") or item.get("function") or item.get("file") or "unknown"
-            print(f"  VIOLATION: {name}  {key}={val} > {threshold}", file=sys.stderr)
-            count += 1
-print(count)
+    cyclo = None
+    metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
+    for key in CYCLO_KEYS:
+        for source in (item, metrics):
+            val = source.get(key) if isinstance(source, dict) else None
+            if isinstance(val, (int, float)):
+                cyclo = val
+                break
+        if cyclo is not None:
+            break
+    if cyclo is None or cyclo <= threshold:
+        continue
+    name = (
+        item.get("canonical_name")
+        or item.get("name")
+        or item.get("function")
+        or item.get("function_name")
+        or item.get("id")
+        or "unknown"
+    )
+    file = item.get("file") or item.get("path") or item.get("filename") or ""
+    line = item.get("line") or item.get("start_line") or item.get("line_start") or ""
+    identity = (str(file), str(name), str(line), float(cyclo))
+    if identity in seen:
+        continue
+    seen.add(identity)
+    location = f"{file}:{line}" if file else ""
+    violations.append((cyclo, name, location))
+
+violations.sort(key=lambda row: row[0], reverse=True)
+for cyclo, name, location in violations:
+    suffix = f"  {location}" if location else ""
+    print(f"  VIOLATION: {name}  cyclomatic={cyclo} > {threshold}{suffix}")
+print(f"COUNT={len(violations)}")
+sys.exit(0)
 PYEOF
 )"
-  fi
+GATE_STATUS=$?
+set -e
 
-  if [[ "${VIOLATING_COUNT}" -gt 0 ]]; then
-    if [[ -f "${JUSTIFICATION_FILE}" ]]; then
-      echo "    WARNING: ${VIOLATING_COUNT} function(s) exceed cyclomatic complexity ${COMPLEXITY_THRESHOLD}."
-      echo "    Justification file found (${JUSTIFICATION_FILE}); gate suppressed."
-    else
-      echo ""
-      echo "ERROR: ${VIOLATING_COUNT} function(s) exceed cyclomatic complexity ${COMPLEXITY_THRESHOLD}."
-      echo "  To suppress: add a justification to ${JUSTIFICATION_FILE}"
-      echo "  To fix: refactor the flagged functions until complexity <= ${COMPLEXITY_THRESHOLD}."
-      exit 1
-    fi
-  else
-    echo "    No cyclomatic complexity violations detected (or schema not parseable — conservative pass)."
-    echo "    NOTE: The >20 cyclomatic gate will be strictly enforced once the JSON schema is confirmed."
-  fi
+if [[ "${GATE_STATUS}" -ne 0 ]]; then
+	echo "${GATE_OUTPUT}"
+	echo "ERROR: failed to evaluate Debtmap JSON for the cyclomatic gate."
+	exit 1
+fi
+
+echo "${GATE_OUTPUT}"
+VIOLATING_COUNT="$(printf '%s\n' "${GATE_OUTPUT}" | sed -n 's/^COUNT=//p' | tail -n 1)"
+VIOLATING_COUNT="${VIOLATING_COUNT:-0}"
+
+if [[ "${VIOLATING_COUNT}" -gt 0 ]]; then
+	if [[ -f "${JUSTIFICATION_FILE}" ]]; then
+		echo "    WARNING: ${VIOLATING_COUNT} function(s) exceed cyclomatic complexity ${COMPLEXITY_THRESHOLD}."
+		echo "    Justification file found (${JUSTIFICATION_FILE}); gate suppressed."
+		echo "    Document why each hotspot's complexity is inherent before relying on this escape hatch."
+	else
+		echo ""
+		echo "ERROR: ${VIOLATING_COUNT} function(s) exceed cyclomatic complexity ${COMPLEXITY_THRESHOLD}."
+		echo "  Refactor the flagged functions. Do not suppress this gate to make CI green."
+		echo "  If complexity is inherent, document it in ${JUSTIFICATION_FILE}."
+		exit 1
+	fi
 else
-  echo "    ${OUTPUT_JSON} not produced; cannot parse complexity values."
-  echo "    NOTE: The >20 cyclomatic gate will be enforced once JSON output is available."
+	echo "    No functions exceeded cyclomatic complexity ${COMPLEXITY_THRESHOLD}."
 fi
 
 echo ""

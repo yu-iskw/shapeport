@@ -44,10 +44,11 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      - name: Run deep analysis
+      - name: Run Miri
         env:
           INSTALL_NIGHTLY: "1"
-          MIRIFLAGS: "-Zmiri-isolation-error=warn"
+          SKIP_UDEPS: "1"
+          MIRIFLAGS: "-Zmiri-disable-isolation"
         run: bash ./dev/deep-analysis.sh
 
   udeps:

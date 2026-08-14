@@ -74,8 +74,9 @@ They operate on different file sets and are not duplicates.
 |---|---|
 | Debtmap | Cyclomatic complexity hotspots across the codebase |
 
-Debtmap is staged (not blocking every PR by default) because it measures architectural debt that accumulates over time rather than per-commit regressions.
+The complexity workflow runs on pull requests, but most Debtmap metrics are informational.
 The fast authoritative gate for per-function complexity is Clippy's `cognitive_complexity` lint with threshold 10.
+Debtmap fails CI only for conservative gates: cyclomatic complexity above 20 (unless justified) and the density threshold in `.debtmap.toml`.
 
 **Entry point:** `make analyze-complexity`
 

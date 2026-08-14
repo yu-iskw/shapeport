@@ -13,3 +13,11 @@ CLAUDE.local.md
 .codeql_db/
 codeql-results.sarif
 codeql-summary.txt
+
+# Coverage and maintainability artifacts (generated, do not commit)
+coverage.lcov
+coverage/
+*.profraw
+lcov.info
+target/debtmap.json
+debtmap-report.json

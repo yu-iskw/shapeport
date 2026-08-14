@@ -93,31 +93,39 @@ install_cargo_tool cargo-udeps cargo-udeps
 # ---------------------------------------------------------------------------
 # Miri: undefined-behaviour / memory safety testing
 # ---------------------------------------------------------------------------
-echo ""
-echo "==> Running cargo +nightly miri test --workspace ..."
-echo "    (MIRIFLAGS: ${MIRIFLAGS:--Zmiri-disable-isolation})"
-# Disable isolation so filesystem-accessing tests can run.
-export MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation}"
-if ! cargo +nightly miri test --workspace; then
+if [[ "${SKIP_MIRI:-}" == "1" ]]; then
+  echo "==> SKIP_MIRI=1 set; skipping Miri."
+else
   echo ""
-  echo "ERROR: Miri reported test failures. Check the output above for details."
-  echo "  Common causes: undefined behaviour, invalid memory access, data races."
-  echo "  If a test requires OS isolation disabled, MIRIFLAGS is already set to"
-  echo "  -Zmiri-disable-isolation. For additional flags see:"
-  echo "    https://github.com/rust-lang/miri#miriflags"
-  exit 1
+  echo "==> Running cargo +nightly miri test --workspace ..."
+  echo "    (MIRIFLAGS: ${MIRIFLAGS:--Zmiri-disable-isolation})"
+  echo "    Miri is dynamic: it only checks executed paths."
+  export MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation}"
+  if ! cargo +nightly miri test --workspace; then
+    echo ""
+    echo "ERROR: Miri reported test failures. Check the output above for details."
+    echo "  Common causes: undefined behaviour, invalid memory access, data races,"
+    echo "  or tests that need OS features Miri does not emulate."
+    echo "  MIRIFLAGS defaults to -Zmiri-disable-isolation so filesystem tests can run."
+    echo "  See https://github.com/rust-lang/miri#miriflags"
+    exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------------------
 # cargo-udeps: detect unused dependencies
 # ---------------------------------------------------------------------------
-echo ""
-echo "==> Running cargo +nightly udeps --workspace ..."
-if ! cargo +nightly udeps --workspace; then
+if [[ "${SKIP_UDEPS:-}" == "1" ]]; then
+  echo "==> SKIP_UDEPS=1 set; skipping cargo-udeps."
+else
   echo ""
-  echo "ERROR: cargo-udeps found unused dependencies."
-  echo "  Remove them from Cargo.toml or suppress with #[allow(unused_extern_crates)]."
-  exit 1
+  echo "==> Running cargo +nightly udeps --workspace ..."
+  if ! cargo +nightly udeps --workspace --all-targets --all-features; then
+    echo ""
+    echo "ERROR: cargo-udeps found unused dependencies."
+    echo "  Remove them from Cargo.toml after confirming cargo-shear agrees."
+    exit 1
+  fi
 fi
 
 echo ""
