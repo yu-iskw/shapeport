@@ -153,13 +153,19 @@ Pass with `shapeport --config shapeport.yaml serve`.
 ## Development
 
 ```bash
-make setup   # fetch Cargo dependencies
-make lint    # Trunk + strict workspace Clippy
-make format  # rustfmt + repo formatters
-make test    # cargo test --workspace --all-features
-make build   # release binaries and libraries
-make clean   # remove build artifacts
+make setup              # fetch Cargo dependencies; install cargo tools
+make format             # rustfmt + Trunk repo formatters
+make lint               # Trunk, cargo check, Clippy, cargo-shear, cargo-deny
+make check-features     # cargo hack --each-feature across the workspace
+make test               # cargo test --workspace --all-features
+make coverage           # cargo-llvm-cov report
+make analyze-complexity # Debtmap cyclomatic complexity analysis
+make deep-analysis      # Miri + cargo-udeps (requires nightly toolchain)
+make build              # release binaries and libraries
+make clean              # remove build artifacts
 ```
+
+See [docs/quality.md](docs/quality.md) for the full quality-assurance architecture, complexity thresholds, lint suppression policy, and tool upgrade process.
 
 ## Architecture
 

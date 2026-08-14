@@ -20,14 +20,27 @@ Codex-specific project guidance lives in `AGENTS.md`. Keep Claude-only workflow 
 ## Quick Commands
 
 ```bash
-make setup   # fetch Cargo dependencies
-make lint    # run Trunk plus strict workspace clippy
-make format  # format Rust and repo files
-make test    # run workspace tests
-make codeql  # run local CodeQL analysis
-make build   # build release binaries and libraries
-make clean   # remove build artifacts
+make setup              # fetch Cargo dependencies; install cargo tools
+make format             # rustfmt + Trunk repo formatters
+make lint               # Trunk, cargo check, Clippy, cargo-shear, cargo-deny
+make check-features     # cargo hack --each-feature across the workspace
+make test               # cargo test --workspace --all-features
+make coverage           # cargo-llvm-cov report
+make analyze-complexity # Debtmap cyclomatic complexity analysis
+make deep-analysis      # Miri + cargo-udeps (requires nightly toolchain)
+make build              # release binaries and libraries
+make semver-checks      # cargo-semver-checks (run on main/release or with a baseline)
+make codeql             # local CodeQL analysis
+make clean              # remove build artifacts
 ```
+
+Run the appropriate tier before completing work:
+
+- **Ordinary changes:** `make lint && make test`
+- **Significant changes** (new modules, refactors, dependency additions): also `make check-features && make analyze-complexity`
+- **Unsafe or high-risk changes:** also `make deep-analysis`
+
+See `docs/quality.md` for the full quality-assurance architecture.
 
 ## Rust Guardrails
 
@@ -41,9 +54,26 @@ workspace = true
 
 - Keep `cargo clippy --workspace --all-targets --all-features -- -D warnings` clean.
 - Treat Clippy `pedantic`, `cargo`, and `cognitive_complexity` findings as mandatory fixes.
-- Refactor functions before they become hard to read; the cognitive complexity threshold is `10`.
+- Refactor functions before they become hard to read; the cognitive complexity threshold is `10` (`clippy.toml`).
 - `too-many-arguments-threshold` is `6` — use option structs (e.g. `PlanCmd`, `TransformCmd`) for functions with more parameters.
-- Avoid `unsafe` unless there is a documented need and explicit review.
+- `too-many-lines-threshold` is `100`; `type-complexity-threshold` is `250`.
+- `unsafe_code = forbid`. If unsafe becomes necessary: isolate it, add `// SAFETY:` comments, run Miri.
+
+### Lint suppressions
+
+- Do not suppress lint failures merely to make CI green.
+- Refactor complexity violations first; split functions, introduce named types.
+- When suppression is genuinely necessary, use a scoped `#[allow(...)]` with a comment explaining why the complexity is inherent.
+- `unwrap_used`, `expect_used`, `panic`, and `indexing_slicing` are **not** globally denied. Tests may use `unwrap`/`expect`. Production code uses `Result`.
+
+### Dependencies
+
+- Do not add a dependency without running `make lint` to verify cargo-shear and cargo-deny still pass.
+- Do not assume `--all-features` proves individual features compile in isolation; use `make check-features`.
+
+### Dead-code and unused APIs
+
+- Public APIs in `shapeport-core` and `shapeport-mcp` cannot always be proven dead because external callers are invisible. Use `cargo-udeps` (nightly, via `make deep-analysis`) as a second opinion.
 
 ## Testing
 
