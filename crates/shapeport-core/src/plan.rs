@@ -58,6 +58,10 @@ pub enum Expr {
         args: Vec<Self>,
     },
     Object(IndexMap<String, Self>),
+    ListMap {
+        input: FieldPath,
+        item: Box<Self>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -283,7 +287,7 @@ fn validate_cast_target(target: &str, policy: CastPolicy) -> Result<()> {
     if matches!(ty, Type::Float { .. }) && policy == CastPolicy::Strict {
         return Err(Error::plan(
             "lossy_cast_required",
-            "decimal/string\u{2192}float64 requires policy: lossy",
+            "decimal/string→float64 requires policy: lossy",
         ));
     }
     Ok(())
@@ -302,6 +306,7 @@ fn validate_expr(expr: &Expr) -> Result<()> {
         Expr::Coalesce(items) => validate_exprs(items),
         Expr::Call { args, .. } => validate_exprs(args),
         Expr::Object(fields) => validate_fields_exprs(fields),
+        Expr::ListMap { item, .. } => validate_expr(item),
         Expr::Field(_) | Expr::Literal(_) => Ok(()),
     }
 }
@@ -357,6 +362,27 @@ mod tests {
         fields.insert(
             "month".into(),
             Expr::Field(FieldPath::parse("period").expect("path")),
+        );
+        let plan = TransformationPlan::new(vec![Operation::Map { fields }]);
+        let json = serde_json::to_string(&plan).expect("json");
+        let parsed = parse_plan_json(&json).expect("parse");
+        assert_eq!(parsed.operations.len(), 1);
+    }
+
+    #[test]
+    fn accepts_list_map_expression() {
+        let mut item_fields = IndexMap::new();
+        item_fields.insert(
+            "firstName".into(),
+            Expr::Field(FieldPath::parse("first_name").expect("path")),
+        );
+        let mut fields = IndexMap::new();
+        fields.insert(
+            "customers".into(),
+            Expr::ListMap {
+                input: FieldPath::parse("customers").expect("path"),
+                item: Box::new(Expr::Object(item_fields)),
+            },
         );
         let plan = TransformationPlan::new(vec![Operation::Map { fields }]);
         let json = serde_json::to_string(&plan).expect("json");

@@ -13,6 +13,8 @@ pub mod functions;
 pub mod json_schema;
 pub mod path;
 pub mod plan;
+// Planner candidate values intentionally cross assignment boundaries by ownership.
+#[allow(clippy::needless_pass_by_value)]
 pub mod planner;
 pub mod query;
 pub mod schema;

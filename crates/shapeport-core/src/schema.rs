@@ -241,6 +241,9 @@ pub fn types_compatible(source: &Type, target: &Type) -> bool {
     if matches!(target, Type::Any) || matches!(source, Type::Unknown) {
         return true;
     }
+    if matches!((source, target), (Type::List { .. }, Type::List { .. })) {
+        return source == target;
+    }
     if std::mem::discriminant(source) == std::mem::discriminant(target) {
         return true;
     }
@@ -256,7 +259,7 @@ pub fn types_compatible(source: &Type, target: &Type) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Field, Schema, Type};
+    use super::{Field, Schema, Type, types_compatible};
 
     #[test]
     fn record_field_order_is_preserved() {
@@ -271,5 +274,19 @@ mod tests {
             .map(|f| f.name.as_str())
             .collect();
         assert_eq!(names, ["month", "revenue"]);
+    }
+
+    #[test]
+    fn list_compatibility_requires_exact_element_type() {
+        let source = Type::list(
+            Type::record(vec![Field::new("first_name", Type::String, false)]),
+            false,
+        );
+        let target = Type::list(
+            Type::record(vec![Field::new("firstName", Type::String, false)]),
+            false,
+        );
+        assert!(!types_compatible(&source, &target));
+        assert!(types_compatible(&source, &source));
     }
 }

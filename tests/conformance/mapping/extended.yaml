@@ -241,3 +241,88 @@ cases:
       status: ambiguous
       ambiguousTargets: [customer_enabled]
       unsafeAutoMapping: false
+
+  - name: list-record-element-normalization
+    family: arrays/map
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: customers
+            type:
+              kind: list
+              element:
+                kind: record
+                fields:
+                  - name: first_name
+                    type: { kind: string }
+                    nullable: false
+              element_nullable: false
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: customers
+            type:
+              kind: list
+              element:
+                kind: record
+                fields:
+                  - name: firstName
+                    type: { kind: string }
+                    nullable: false
+              element_nullable: false
+            nullable: false
+    expect:
+      status: ready
+      mappings:
+        customers: customers
+        customers[].firstName: customers[].first_name
+      reasonKinds:
+        customers: [cardinality-preserving list map]
+        customers[].firstName: [normalized-name match, exact type match]
+
+  - name: list-record-element-ambiguity-is-not-guessed
+    family: adversarial/arrays
+    mode: smart
+    sourceSchema:
+      root:
+        kind: record
+        fields:
+          - name: customers
+            type:
+              kind: list
+              element:
+                kind: record
+                fields:
+                  - name: customer_id
+                    type: { kind: string }
+                    nullable: false
+                  - name: customer-id
+                    type: { kind: string }
+                    nullable: false
+              element_nullable: false
+            nullable: false
+    targetSchema:
+      root:
+        kind: record
+        fields:
+          - name: customers
+            type:
+              kind: list
+              element:
+                kind: record
+                fields:
+                  - name: customerId
+                    type: { kind: string }
+                    nullable: false
+              element_nullable: false
+            nullable: false
+    expect:
+      status: ambiguous
+      ambiguousTargets: [customers]
+      acceptableCandidates:
+        customers: [customers]
+      unsafeAutoMapping: false

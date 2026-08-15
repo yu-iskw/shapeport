@@ -379,6 +379,28 @@ fn eval_expr(record: &Value, expr: &Expr) -> Result<Value> {
             functions::call(function, &values)
         }
         Expr::Object(fields) => eval_object(record, fields),
+        Expr::ListMap { input, item } => eval_list_map(record, input, item),
+    }
+}
+
+fn eval_list_map(record: &Value, input: &FieldPath, item_expr: &Expr) -> Result<Value> {
+    match read_path(record, input)? {
+        Value::Null => Ok(Value::Null),
+        Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                if item.is_null() {
+                    out.push(Value::Null);
+                } else {
+                    out.push(eval_expr(&item, item_expr)?);
+                }
+            }
+            Ok(Value::Array(out))
+        }
+        _ => Err(Error::transform(
+            "list_map_type",
+            "listMap input must be an array or null",
+        )),
     }
 }
 
@@ -425,7 +447,7 @@ fn cast_value(value: &Value, target: &str, policy: CastPolicy) -> Result<Value> 
         }
         (Type::Float { .. }, Value::String(_)) => Err(Error::transform(
             "lossy_cast_required",
-            "string\u{2192}float64 requires policy: lossy",
+            "string→float64 requires policy: lossy",
         )),
         (Type::Decimal { .. }, Value::Decimal(dec)) => Ok(Value::Decimal(dec.clone())),
         (Type::Decimal { .. }, Value::String(text)) => DecimalValue::parse_str(text)
@@ -508,8 +530,106 @@ mod tests {
     }
 
     #[test]
+    fn list_map_preserves_cardinality_and_order() {
+        let mut item_fields = IndexMap::new();
+        item_fields.insert(
+            "firstName".into(),
+            Expr::Field(FieldPath::parse("first_name").expect("path")),
+        );
+        let mut fields = IndexMap::new();
+        fields.insert(
+            "customers".into(),
+            Expr::ListMap {
+                input: FieldPath::parse("customers").expect("path"),
+                item: Box::new(Expr::Object(item_fields)),
+            },
+        );
+        let plan = TransformationPlan::new(vec![Operation::Map { fields }]);
+        let input = Value::object([(
+            "customers".into(),
+            Value::Array(vec![
+                Value::object([("first_name".into(), Value::String("Ada".into()))]),
+                Value::object([("first_name".into(), Value::String("Grace".into()))]),
+            ]),
+        )]);
+        let out = execute_plan(&plan, vec![input]).expect("exec");
+        let customers = out[0]
+            .as_object()
+            .expect("obj")
+            .get("customers")
+            .expect("customers");
+        let Value::Array(items) = customers else {
+            panic!("expected array");
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0].as_object().expect("item").get("firstName"),
+            Some(&Value::String("Ada".into()))
+        );
+        assert_eq!(
+            items[1].as_object().expect("item").get("firstName"),
+            Some(&Value::String("Grace".into()))
+        );
+    }
+
+    #[test]
+    fn list_map_preserves_null_list() {
+        let mut fields = IndexMap::new();
+        fields.insert(
+            "items".into(),
+            Expr::ListMap {
+                input: FieldPath::parse("items").expect("path"),
+                item: Box::new(Expr::Field(FieldPath::parse("value").expect("path"))),
+            },
+        );
+        let plan = TransformationPlan::new(vec![Operation::Map { fields }]);
+        let input = Value::object([("items".into(), Value::Null)]);
+        let out = execute_plan(&plan, vec![input]).expect("exec");
+        assert_eq!(
+            out[0].as_object().expect("obj").get("items"),
+            Some(&Value::Null)
+        );
+    }
+
+    #[test]
+    fn list_map_preserves_null_elements() {
+        let mut item_fields = IndexMap::new();
+        item_fields.insert(
+            "firstName".into(),
+            Expr::Field(FieldPath::parse("first_name").expect("path")),
+        );
+        let mut fields = IndexMap::new();
+        fields.insert(
+            "customers".into(),
+            Expr::ListMap {
+                input: FieldPath::parse("customers").expect("path"),
+                item: Box::new(Expr::Object(item_fields)),
+            },
+        );
+        let plan = TransformationPlan::new(vec![Operation::Map { fields }]);
+        let input = Value::object([(
+            "customers".into(),
+            Value::Array(vec![
+                Value::object([("first_name".into(), Value::String("Ada".into()))]),
+                Value::Null,
+                Value::object([("first_name".into(), Value::String("Grace".into()))]),
+            ]),
+        )]);
+        let out = execute_plan(&plan, vec![input]).expect("exec");
+        let Value::Array(items) = out[0]
+            .as_object()
+            .expect("obj")
+            .get("customers")
+            .expect("customers")
+        else {
+            panic!("expected array");
+        };
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[1], Value::Null);
+    }
+
+    #[test]
     fn decimal_to_float64_strict_fails() {
-        // plan validation catches float+strict before reaching cast_value
         let plan = cast_plan("float64", CastPolicy::Strict);
         let err = execute_plan(&plan, vec![decimal_record("x", "3.14")]).unwrap_err();
         assert_eq!(err.code, "lossy_cast_required");
@@ -535,7 +655,6 @@ mod tests {
 
     #[test]
     fn collect_policy_on_bad_cast_collects_reject_and_returns_good_records() {
-        // bool→int64 has no cast path; fails at runtime under Strict cast policy
         let bad = Value::object([("x".into(), Value::Bool(true))]);
         let good = Value::object([("x".into(), Value::Int(42))]);
         let mut plan = cast_plan("int64", CastPolicy::Strict);
