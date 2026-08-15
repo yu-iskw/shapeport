@@ -389,7 +389,11 @@ fn eval_list_map(record: &Value, input: &FieldPath, item_expr: &Expr) -> Result<
         Value::Array(items) => {
             let mut out = Vec::with_capacity(items.len());
             for item in items {
-                out.push(eval_expr(&item, item_expr)?);
+                if item.is_null() {
+                    out.push(Value::Null);
+                } else {
+                    out.push(eval_expr(&item, item_expr)?);
+                }
             }
             Ok(Value::Array(out))
         }
@@ -585,6 +589,43 @@ mod tests {
             out[0].as_object().expect("obj").get("items"),
             Some(&Value::Null)
         );
+    }
+
+    #[test]
+    fn list_map_preserves_null_elements() {
+        let mut item_fields = IndexMap::new();
+        item_fields.insert(
+            "firstName".into(),
+            Expr::Field(FieldPath::parse("first_name").expect("path")),
+        );
+        let mut fields = IndexMap::new();
+        fields.insert(
+            "customers".into(),
+            Expr::ListMap {
+                input: FieldPath::parse("customers").expect("path"),
+                item: Box::new(Expr::Object(item_fields)),
+            },
+        );
+        let plan = TransformationPlan::new(vec![Operation::Map { fields }]);
+        let input = Value::object([(
+            "customers".into(),
+            Value::Array(vec![
+                Value::object([("first_name".into(), Value::String("Ada".into()))]),
+                Value::Null,
+                Value::object([("first_name".into(), Value::String("Grace".into()))]),
+            ]),
+        )]);
+        let out = execute_plan(&plan, vec![input]).expect("exec");
+        let Value::Array(items) = out[0]
+            .as_object()
+            .expect("obj")
+            .get("customers")
+            .expect("customers")
+        else {
+            panic!("expected array");
+        };
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[1], Value::Null);
     }
 
     #[test]
