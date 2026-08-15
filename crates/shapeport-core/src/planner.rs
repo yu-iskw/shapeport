@@ -203,10 +203,8 @@ fn build_target_leaf(
     target_path: &str,
     context: &mut BuildContext<'_>,
 ) -> Result<Option<Expr>> {
-    if matches!(target_field.ty, Type::List { .. })
-        && let Some(expr) = build_list_mapping(target_field, target_path, context)?
-    {
-        return Ok(Some(expr));
+    if matches!(target_field.ty, Type::List { .. }) {
+        return build_list_mapping(target_field, target_path, context);
     }
 
     let target = FieldRef {
@@ -311,7 +309,7 @@ fn build_list_mapping(
             reasons: candidate.reasons.clone(),
             action: format!("map {} -> {target_path}", candidate.source),
         });
-        return Ok(Some(Expr::Field(FieldPath::parse(&candidate.source)?)));
+        return Ok(Some(Expr::Field(FieldPath::parse(&candidate.source)?));
     }
 
     let (Type::Record { .. }, Type::Record { .. }) = (&**source_element, &**target_element) else {
