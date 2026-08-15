@@ -289,7 +289,13 @@ fn build_list_mapping(
     if source_element == target_element {
         return accept_direct_list_mapping(candidate, target_path, context).map(Some);
     }
-    build_record_list_mapping(source_element, target_element, candidate, target_path, context)
+    build_record_list_mapping(
+        source_element,
+        target_element,
+        &candidate,
+        target_path,
+        context,
+    )
 }
 
 fn choose_list_candidate(
@@ -345,12 +351,12 @@ fn accept_direct_list_mapping(
 fn build_record_list_mapping(
     source_element: &Type,
     target_element: &Type,
-    candidate: Candidate,
+    candidate: &Candidate,
     target_path: &str,
     context: &mut BuildContext<'_>,
 ) -> Result<Option<Expr>> {
     let (Type::Record { .. }, Type::Record { .. }) = (source_element, target_element) else {
-        push_unresolved(target_path, vec![candidate], context);
+        push_unresolved(target_path, vec![candidate.clone()], context);
         return Ok(None);
     };
     let nested = plan_schemas(
@@ -362,7 +368,7 @@ fn build_record_list_mapping(
         plan, explanation, ..
     } = nested
     else {
-        push_unresolved(target_path, vec![candidate], context);
+        push_unresolved(target_path, vec![candidate.clone()], context);
         return Ok(None);
     };
     let Some(Operation::Map { fields }) = plan.operations.first() else {
@@ -417,11 +423,7 @@ fn push_optional_omission(target_path: &str, context: &mut BuildContext<'_>) {
     });
 }
 
-fn push_unresolved(
-    target_path: &str,
-    candidates: Vec<Candidate>,
-    context: &mut BuildContext<'_>,
-) {
+fn push_unresolved(target_path: &str, candidates: Vec<Candidate>, context: &mut BuildContext<'_>) {
     context.unresolved.push(Unresolved {
         target: target_path.to_string(),
         candidates,
