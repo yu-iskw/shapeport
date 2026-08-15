@@ -2,6 +2,7 @@ name: Complexity Analysis
 
 on:
   pull_request:
+    types: [opened, reopened, ready_for_review]
     paths:
       - Cargo.toml
       - Cargo.lock
@@ -48,6 +49,7 @@ concurrency:
 
 jobs:
   debtmap:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Debtmap Analysis
     runs-on: ubuntu-latest
     steps:
