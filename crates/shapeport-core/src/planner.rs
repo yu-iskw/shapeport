@@ -276,7 +276,23 @@ fn build_list_mapping(
             push_ambiguous(target_path, candidates, context);
             return Ok(None);
         }
-        Assign::Missing => return Ok(None),
+        Assign::Missing if target_field.nullable => {
+            context.explanation.push(ExplainEntry {
+                target: target_path.to_string(),
+                source: None,
+                score: 0.0,
+                reasons: vec!["optional unmatched".into()],
+                action: "omit".into(),
+            });
+            return Ok(None);
+        }
+        Assign::Missing => {
+            context.unresolved.push(Unresolved {
+                target: target_path.to_string(),
+                candidates: Vec::new(),
+            });
+            return Ok(None);
+        }
     };
 
     let Some(source_ref) = context
@@ -284,21 +300,38 @@ fn build_list_mapping(
         .iter()
         .find(|source| source.path == candidate.source)
     else {
+        context.unresolved.push(Unresolved {
+            target: target_path.to_string(),
+            candidates: vec![candidate],
+        });
         return Ok(None);
     };
     let (
         Type::List {
             element: source_element,
-            ..
+            element_nullable: source_element_nullable,
         },
         Type::List {
             element: target_element,
-            ..
+            element_nullable: target_element_nullable,
         },
     ) = (&source_ref.field.ty, &target_field.ty)
     else {
-        return Ok(None);
+        return Err(Error::plan(
+            "list_map_plan",
+            "list mapping candidate must contain list source and target types",
+        ));
     };
+
+    if (source_ref.field.nullable && !target_field.nullable)
+        || (*source_element_nullable && !*target_element_nullable)
+    {
+        context.unresolved.push(Unresolved {
+            target: target_path.to_string(),
+            candidates: vec![candidate],
+        });
+        return Ok(None);
+    }
 
     if source_element == target_element {
         context.used_sources.push(candidate.source.clone());
@@ -309,10 +342,14 @@ fn build_list_mapping(
             reasons: candidate.reasons.clone(),
             action: format!("map {} -> {target_path}", candidate.source),
         });
-        return Ok(Some(Expr::Field(FieldPath::parse(&candidate.source)?));
+        return Ok(Some(Expr::Field(FieldPath::parse(&candidate.source)?)));
     }
 
     let (Type::Record { .. }, Type::Record { .. }) = (&**source_element, &**target_element) else {
+        context.unresolved.push(Unresolved {
+            target: target_path.to_string(),
+            candidates: vec![candidate],
+        });
         return Ok(None);
     };
     let nested = plan_schemas(
