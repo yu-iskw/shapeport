@@ -87,7 +87,7 @@ Supported expectations are:
 
 ## Scenario families
 
-The initial corpus covers:
+The current corpus covers:
 
 - exact and normalized names;
 - aliases and schema-evolution renames;
@@ -97,15 +97,28 @@ The initial corpus covers:
 - nullability and missing required fields;
 - default-bearing fields;
 - enum-domain preservation;
-- arrays;
+- cardinality-preserving list mapping and adversarial list-element ambiguity;
 - flattening safety;
 - nested object construction safety;
 - ambiguous mappings and adversarial collisions;
 - real integration-shaped Flint, MCP, and warehouse contracts.
 
-The purpose of a family is to pin safe planner behavior even when synthesis for that operation does not exist yet. For example, the flattening and nested-construction fixtures currently require ambiguity instead of allowing a plausible structural guess. Likewise, the default fixture verifies safe omission of an optional default-bearing target; it does not claim that the planner synthesizes literal defaults yet.
+The purpose of a family is to pin safe planner behavior even when synthesis for that operation does not exist yet. The default fixture verifies safe omission of an optional default-bearing target; it does not claim that the planner synthesizes literal defaults yet.
 
-When a follow-up capability adds structural planning such as nested object construction, flattening, enum-domain conversion, timestamp parsing, defaults, or array explosion, update the relevant fixture in the same change that implements the behavior. Execution-level fixtures can additionally carry input and expected output once the planner synthesizes the required operation.
+### List mapping invariant
+
+List element synthesis is deliberately narrower than generic "array support." ShapePort may infer `List<S> -> List<T>` only when the list container maps unambiguously and the element transformation is itself deterministic. A generated list map preserves both order and cardinality:
+
+```text
+len(output) == len(input)
+order(output) == order(input)
+```
+
+Identical element types may be preserved directly. Unequal record element types recurse through the normal record planner. Child ambiguity is propagated to the outer list target instead of falling back to whole-list passthrough. Nullable source lists or elements are not inferred into stricter non-null target contracts.
+
+The planner does **not** infer filtering, explosion, reduction, aggregation, or joins from list schemas. Those operations change cardinality or require semantic intent and remain explicit operations.
+
+When a follow-up capability adds structural planning such as enum-domain conversion, timestamp parsing, defaults, or cardinality-changing collection operations, update the relevant fixture in the same change that implements the behavior. Execution-level fixtures can additionally carry input and expected output once the planner synthesizes the required operation.
 
 ## Metrics
 
@@ -128,12 +141,12 @@ The full corpus is compared with `tests/conformance/mapping/baseline.json`. The 
 ```json
 {
   "corpusVersion": 1,
-  "cases": 20,
-  "correctMappings": 16,
+  "cases": 25,
+  "correctMappings": 22,
   "unsafeAutoMappings": 0,
-  "correctAmbiguities": 7,
+  "correctAmbiguities": 8,
   "falseAmbiguities": 0,
-  "exactPlanSuccesses": 20
+  "exactPlanSuccesses": 25
 }
 ```
 
