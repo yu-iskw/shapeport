@@ -234,20 +234,11 @@ fn build_target_leaf(
             Ok(None)
         }
         Assign::Missing if target_field.nullable => {
-            context.explanation.push(ExplainEntry {
-                target: target_path.to_string(),
-                source: None,
-                score: 0.0,
-                reasons: vec!["optional unmatched".into()],
-                action: "omit".into(),
-            });
+            push_optional_omission(target_path, context);
             Ok(None)
         }
         Assign::Missing => {
-            context.unresolved.push(Unresolved {
-                target: target_path.to_string(),
-                candidates: Vec::new(),
-            });
+            push_unresolved(target_path, Vec::new(), context);
             Ok(None)
         }
     }
@@ -258,6 +249,54 @@ fn build_list_mapping(
     target_path: &str,
     context: &mut BuildContext<'_>,
 ) -> Result<Option<Expr>> {
+    let Some(candidate) = choose_list_candidate(target_field, target_path, context) else {
+        return Ok(None);
+    };
+    let Some(source_field) = context
+        .sources
+        .iter()
+        .find(|source| source.path == candidate.source)
+        .map(|source| source.field.clone())
+    else {
+        push_unresolved(target_path, vec![candidate], context);
+        return Ok(None);
+    };
+
+    let (
+        Type::List {
+            element: source_element,
+            element_nullable: source_element_nullable,
+        },
+        Type::List {
+            element: target_element,
+            element_nullable: target_element_nullable,
+        },
+    ) = (&source_field.ty, &target_field.ty)
+    else {
+        return Err(Error::plan(
+            "list_map_plan",
+            "list mapping candidate must contain list source and target types",
+        ));
+    };
+
+    if (source_field.nullable && !target_field.nullable)
+        || (*source_element_nullable && !*target_element_nullable)
+    {
+        push_unresolved(target_path, vec![candidate], context);
+        return Ok(None);
+    }
+
+    if source_element == target_element {
+        return accept_direct_list_mapping(candidate, target_path, context).map(Some);
+    }
+    build_record_list_mapping(source_element, target_element, candidate, target_path, context)
+}
+
+fn choose_list_candidate(
+    target_field: &Field,
+    target_path: &str,
+    context: &mut BuildContext<'_>,
+) -> Option<Candidate> {
     let target = FieldRef {
         path: target_path.to_string(),
         field: target_field,
@@ -270,101 +309,60 @@ fn build_list_mapping(
         .collect();
     ranked.sort_by(|a, b| b.score.total_cmp(&a.score));
 
-    let candidate = match select_candidate(ranked, context.options) {
-        Assign::Mapped(candidate) => candidate,
+    match select_candidate(ranked, context.options) {
+        Assign::Mapped(candidate) => Some(candidate),
         Assign::Ambiguous(candidates) => {
             push_ambiguous(target_path, candidates, context);
-            return Ok(None);
+            None
         }
         Assign::Missing if target_field.nullable => {
-            context.explanation.push(ExplainEntry {
-                target: target_path.to_string(),
-                source: None,
-                score: 0.0,
-                reasons: vec!["optional unmatched".into()],
-                action: "omit".into(),
-            });
-            return Ok(None);
+            push_optional_omission(target_path, context);
+            None
         }
         Assign::Missing => {
-            context.unresolved.push(Unresolved {
-                target: target_path.to_string(),
-                candidates: Vec::new(),
-            });
-            return Ok(None);
+            push_unresolved(target_path, Vec::new(), context);
+            None
         }
-    };
-
-    let Some(source_ref) = context
-        .sources
-        .iter()
-        .find(|source| source.path == candidate.source)
-    else {
-        context.unresolved.push(Unresolved {
-            target: target_path.to_string(),
-            candidates: vec![candidate],
-        });
-        return Ok(None);
-    };
-    let (
-        Type::List {
-            element: source_element,
-            element_nullable: source_element_nullable,
-        },
-        Type::List {
-            element: target_element,
-            element_nullable: target_element_nullable,
-        },
-    ) = (&source_ref.field.ty, &target_field.ty)
-    else {
-        return Err(Error::plan(
-            "list_map_plan",
-            "list mapping candidate must contain list source and target types",
-        ));
-    };
-
-    if (source_ref.field.nullable && !target_field.nullable)
-        || (*source_element_nullable && !*target_element_nullable)
-    {
-        context.unresolved.push(Unresolved {
-            target: target_path.to_string(),
-            candidates: vec![candidate],
-        });
-        return Ok(None);
     }
+}
 
-    if source_element == target_element {
-        context.used_sources.push(candidate.source.clone());
-        context.explanation.push(ExplainEntry {
-            target: target_path.to_string(),
-            source: Some(candidate.source.clone()),
-            score: candidate.score,
-            reasons: candidate.reasons.clone(),
-            action: format!("map {} -> {target_path}", candidate.source),
-        });
-        return Ok(Some(Expr::Field(FieldPath::parse(&candidate.source)?)));
-    }
+fn accept_direct_list_mapping(
+    candidate: Candidate,
+    target_path: &str,
+    context: &mut BuildContext<'_>,
+) -> Result<Expr> {
+    context.used_sources.push(candidate.source.clone());
+    context.explanation.push(ExplainEntry {
+        target: target_path.to_string(),
+        source: Some(candidate.source.clone()),
+        score: candidate.score,
+        reasons: candidate.reasons.clone(),
+        action: format!("map {} -> {target_path}", candidate.source),
+    });
+    Ok(Expr::Field(FieldPath::parse(&candidate.source)?))
+}
 
-    let (Type::Record { .. }, Type::Record { .. }) = (&**source_element, &**target_element) else {
-        context.unresolved.push(Unresolved {
-            target: target_path.to_string(),
-            candidates: vec![candidate],
-        });
+fn build_record_list_mapping(
+    source_element: &Type,
+    target_element: &Type,
+    candidate: Candidate,
+    target_path: &str,
+    context: &mut BuildContext<'_>,
+) -> Result<Option<Expr>> {
+    let (Type::Record { .. }, Type::Record { .. }) = (source_element, target_element) else {
+        push_unresolved(target_path, vec![candidate], context);
         return Ok(None);
     };
     let nested = plan_schemas(
-        &Schema::new((**source_element).clone()),
-        &Schema::new((**target_element).clone()),
+        &Schema::new(source_element.clone()),
+        &Schema::new(target_element.clone()),
         context.options,
     )?;
     let PlanOutcome::Ready {
         plan, explanation, ..
     } = nested
     else {
-        context.unresolved.push(Unresolved {
-            target: target_path.to_string(),
-            candidates: vec![candidate],
-        });
+        push_unresolved(target_path, vec![candidate], context);
         return Ok(None);
     };
     let Some(Operation::Map { fields }) = plan.operations.first() else {
@@ -382,17 +380,7 @@ fn build_list_mapping(
         reasons: vec!["cardinality-preserving list map".into()],
         action: format!("map elements {}[] -> {target_path}[]", candidate.source),
     });
-    for entry in explanation {
-        context.explanation.push(ExplainEntry {
-            target: format!("{target_path}[].{}", entry.target),
-            source: entry
-                .source
-                .map(|source| format!("{}[].{source}", candidate.source)),
-            score: entry.score,
-            reasons: entry.reasons,
-            action: entry.action,
-        });
-    }
+    push_list_element_explanations(target_path, &candidate.source, explanation, context);
 
     Ok(Some(Expr::ListMap {
         input: FieldPath::parse(&candidate.source)?,
@@ -400,11 +388,48 @@ fn build_list_mapping(
     }))
 }
 
-fn push_ambiguous(target_path: &str, candidates: Vec<Candidate>, context: &mut BuildContext<'_>) {
+fn push_list_element_explanations(
+    target_path: &str,
+    source_path: &str,
+    explanation: Vec<ExplainEntry>,
+    context: &mut BuildContext<'_>,
+) {
+    for entry in explanation {
+        context.explanation.push(ExplainEntry {
+            target: format!("{target_path}[].{}", entry.target),
+            source: entry
+                .source
+                .map(|source| format!("{source_path}[].{source}")),
+            score: entry.score,
+            reasons: entry.reasons,
+            action: entry.action,
+        });
+    }
+}
+
+fn push_optional_omission(target_path: &str, context: &mut BuildContext<'_>) {
+    context.explanation.push(ExplainEntry {
+        target: target_path.to_string(),
+        source: None,
+        score: 0.0,
+        reasons: vec!["optional unmatched".into()],
+        action: "omit".into(),
+    });
+}
+
+fn push_unresolved(
+    target_path: &str,
+    candidates: Vec<Candidate>,
+    context: &mut BuildContext<'_>,
+) {
     context.unresolved.push(Unresolved {
         target: target_path.to_string(),
         candidates,
     });
+}
+
+fn push_ambiguous(target_path: &str, candidates: Vec<Candidate>, context: &mut BuildContext<'_>) {
+    push_unresolved(target_path, candidates, context);
     context.explanation.push(ExplainEntry {
         target: target_path.to_string(),
         source: None,
