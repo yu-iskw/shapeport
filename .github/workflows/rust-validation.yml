@@ -41,14 +41,15 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  fmt:
-    name: Format
+  validate:
+    name: Format, lint, features, and test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -58,76 +59,24 @@ jobs:
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: 1.97.1
-          components: rustfmt
+          components: rustfmt,clippy
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Install analysis tools
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: cargo-shear,cargo-deny,cargo-hack
 
       - name: Check formatting
         run: cargo fmt --all --check
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
-        with:
-          toolchain: 1.97.1
-          components: clippy
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Install cargo-shear and cargo-deny
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
-        with:
-          tool: cargo-shear,cargo-deny
-
       - name: Check workspace
         run: bash ./dev/lint.sh
 
-  features:
-    name: Feature Matrix
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
-        with:
-          toolchain: 1.97.1
-          components: clippy
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Install cargo-hack
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
-        with:
-          tool: cargo-hack
-
       - name: Clippy each feature
         run: bash ./dev/check-features.sh
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
-        with:
-          toolchain: 1.97.1
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Run tests
         run: bash ./dev/test.sh
@@ -144,3 +93,6 @@ jobs:
             cat "$GITHUB_WORKSPACE/target/conformance-summary.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trunk Check
+        uses: trunk-io/trunk-action@04ba50e7658c81db7356da96657e6e77f220bfa3 # v1.3.1

@@ -2,6 +2,7 @@ name: Complexity Analysis
 
 on:
   pull_request:
+    types: [opened, reopened, ready_for_review]
     paths:
       - Cargo.toml
       - Cargo.lock

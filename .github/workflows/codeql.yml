@@ -3,6 +3,7 @@ name: CodeQL Analysis
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, reopened, ready_for_review]
     paths:
       - Cargo.toml
       - Cargo.lock
@@ -39,6 +40,10 @@ on:
       - dev/**
       - .github/workflows/**
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   contents: read
@@ -63,7 +68,6 @@ jobs:
         uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           languages: rust
-          # Rust's extractor does not support manual/autobuild; it uses rust-analyzer.
           build-mode: none
           queries: security-and-quality
 
